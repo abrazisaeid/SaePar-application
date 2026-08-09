@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="SaeParTunnel.App.Pages.DashboardPage"
+             Title="خانه">
+    <ScrollView>
+        <VerticalStackLayout Padding="18" Spacing="14" MaximumWidthRequest="1100">
+            <Grid ColumnDefinitions="*,Auto">
+                <VerticalStackLayout Grid.Column="0" Spacing="2">
+                    <Label Text="SaePar Tunnel" Style="{StaticResource TitleLabel}" />
+                    <Label Text="Windows • Android • iPhone" Style="{StaticResource SubtleLabel}" />
+                </VerticalStackLayout>
+                <ActivityIndicator Grid.Column="1"
+                                   IsRunning="{Binding IsBusy}"
+                                   IsVisible="{Binding IsBusy}"
+                                   Color="{StaticResource Accent}"
+                                   WidthRequest="34" HeightRequest="34"
+                                   VerticalOptions="Center" />
+            </Grid>
+
+            <Border Style="{StaticResource Card}">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="{Binding BackendTitle}" FontAttributes="Bold" FontSize="17" />
+                    <Label Text="{Binding BackendNote}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                    <Label Text="{Binding StatusMessage}" TextColor="{StaticResource Accent}" LineBreakMode="WordWrap" />
+                </VerticalStackLayout>
+            </Border>
+
+            <Border Style="{StaticResource Card}" IsVisible="{Binding CannotTunnel}" Stroke="{StaticResource Danger}">
+                <VerticalStackLayout Spacing="5">
+                    <Label Text="اتصال VPN روی این پلتفرم در دسترس نیست" TextColor="{StaticResource Danger}" FontAttributes="Bold" />
+                    <Label Text="Android اکنون VpnService + libXray واقعی دارد. این پیام فقط روی پلتفرم‌هایی نمایش داده می‌شود که Backend تونل ندارند."
+                           Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                </VerticalStackLayout>
+            </Border>
+
+            <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="10">
+                <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource Card}"><VerticalStackLayout><Label Text="کل کانفیگ‌ها" Style="{StaticResource SubtleLabel}"/><Label Text="{Binding TotalProfiles}" FontSize="26" FontAttributes="Bold"/></VerticalStackLayout></Border>
+                <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource Card}"><VerticalStackLayout><Label Text="Full-Test سالم" Style="{StaticResource SubtleLabel}"/><Label Text="{Binding WorkingProfiles}" FontSize="26" FontAttributes="Bold" TextColor="{StaticResource Success}"/></VerticalStackLayout></Border>
+                <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource Card}"><VerticalStackLayout><Label Text="TCP قابل دسترس" Style="{StaticResource SubtleLabel}"/><Label Text="{Binding ReachableProfiles}" FontSize="26" FontAttributes="Bold" TextColor="{StaticResource Accent2}"/></VerticalStackLayout></Border>
+                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource Card}"><VerticalStackLayout><Label Text="ناموفق" Style="{StaticResource SubtleLabel}"/><Label Text="{Binding FailedProfiles}" FontSize="26" FontAttributes="Bold" TextColor="{StaticResource Danger}"/></VerticalStackLayout></Border>
+            </Grid>
+
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                <Button Grid.Column="0" Text="Get Config" Command="{Binding GetConfigCommand}" IsEnabled="{Binding IsNotBusy}" Style="{StaticResource PrimaryButton}" />
+                <Button Grid.Column="1" Text="از Clipboard" Command="{Binding ImportClipboardCommand}" IsEnabled="{Binding IsNotBusy}" />
+            </Grid>
+
+            <Border Style="{StaticResource Card}">
+                <VerticalStackLayout Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <VerticalStackLayout Grid.Column="0" Spacing="2">
+                            <Label Text="انتخاب سرور سالم" FontAttributes="Bold" FontSize="18" />
+                            <Label Text="فقط کانفیگ‌های Full-Test سالم؛ مرتب‌شده بر اساس Ping" Style="{StaticResource SubtleLabel}" />
+                        </VerticalStackLayout>
+                        <Label Grid.Column="1" Text="{Binding HealthyProfilesCountText}"
+                               VerticalOptions="Center" TextColor="{StaticResource Success}" FontAttributes="Bold" />
+                    </Grid>
+
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <Picker Grid.Column="0"
+                                Title="یک کانفیگ سالم انتخاب کن"
+                                ItemsSource="{Binding HealthyProfiles}"
+                                SelectedItem="{Binding SelectedHealthyProfile}"
+                                ItemDisplayBinding="{Binding PickerDisplayText}" />
+                        <Border Grid.Column="1" BackgroundColor="{StaticResource Surface2}" Padding="12,8" VerticalOptions="Fill">
+                            <Label Text="{Binding SelectedHealthyPingText}"
+                                   VerticalOptions="Center" TextColor="{StaticResource Accent}" FontAttributes="Bold" FontSize="17" />
+                        </Border>
+                    </Grid>
+
+                    <Label Text="{Binding HealthySelectionSummary}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                        <Button Grid.Column="0" Text="تست مجدد این کانفیگ"
+                                Command="{Binding TestHealthySelectionCommand}" IsEnabled="{Binding IsNotBusy}" />
+                        <Button Grid.Column="1" Text="اتصال"
+                                Command="{Binding ConnectCommand}" IsEnabled="{Binding IsNotBusy}" Style="{StaticResource PrimaryButton}" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                        <Button Grid.Column="0" Text="اتصال به بهترین Ping" Command="{Binding ConnectBestCommand}" IsEnabled="{Binding IsNotBusy}" />
+                        <Button Grid.Column="1" Text="قطع" Command="{Binding DisconnectCommand}" IsEnabled="{Binding IsNotBusy}" Style="{StaticResource DangerButton}" />
+                    </Grid>
+
+                    <Border BackgroundColor="{StaticResource Surface2}" Padding="12" StrokeThickness="1">
+                        <VerticalStackLayout Spacing="6">
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                <ActivityIndicator Grid.Column="0" IsRunning="{Binding IsBusy}" IsVisible="{Binding IsBusy}" WidthRequest="22" HeightRequest="22" Color="{StaticResource Accent}" />
+                                <Label Grid.Column="1" Text="{Binding ConnectionStatusMessage}" LineBreakMode="WordWrap" VerticalOptions="Center" />
+                            </Grid>
+                            <Button Text="تنظیمات VPN اندروید"
+                                    Command="{Binding OpenAndroidVpnSettingsCommand}"
+                                    IsVisible="{Binding IsAndroid}"
+                                    IsEnabled="{Binding IsNotBusy}" />
+                            <Label Text="اگر مجوز VPN قبلاً برای این برنامه صادر شده باشد، Android طبق طراحی دیگر پنجره تأیید را باز نمی‌کند و مستقیم وارد مرحله اتصال می‌شود."
+                                   IsVisible="{Binding IsAndroid}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                </VerticalStackLayout>
+            </Border>
+
+            <Border Style="{StaticResource Card}" IsVisible="{Binding IsTesting}">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="در حال تست..." FontAttributes="Bold" />
+                    <ProgressBar Progress="{Binding ProgressFraction}" ProgressColor="{StaticResource Accent}" />
+                    <Label Text="{Binding ProgressLabel}" />
+                    <Grid ColumnDefinitions="*,*">
+                        <Label Grid.Column="0" Text="{Binding ProgressSpeed}" Style="{StaticResource SubtleLabel}" />
+                        <Label Grid.Column="1" Text="{Binding ProgressEta}" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="End" />
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                        <Label Grid.Column="0" Text="موفق:" />
+                        <Label Grid.Column="1" Text="{Binding ProgressWorking}" TextColor="{StaticResource Success}" />
+                        <Label Grid.Column="2" Text="ناموفق:" />
+                        <Label Grid.Column="3" Text="{Binding ProgressFailed}" TextColor="{StaticResource Danger}" />
+                    </Grid>
+                    <Button Text="توقف تست" Command="{Binding CancelTestCommand}" Style="{StaticResource DangerButton}" />
+                </VerticalStackLayout>
+            </Border>
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

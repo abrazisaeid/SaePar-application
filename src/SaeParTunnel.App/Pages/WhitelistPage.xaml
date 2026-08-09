@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="SaeParTunnel.App.Pages.WhitelistPage" Title="Whitelist">
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="16" MaximumWidthRequest="1000">
+            <Label Text="Whitelist / Split Tunneling" Style="{StaticResource TitleLabel}" />
+            <Border Style="{StaticResource Card}">
+                <Grid ColumnDefinitions="*,Auto">
+                    <VerticalStackLayout>
+                        <Label Text="فعال‌سازی Whitelist" FontAttributes="Bold"/>
+                        <Label Text="Windows: موارد لیست‌شده Proxy و بقیه Direct. Android: اگر برنامه انتخاب کنی فقط همان برنامه‌ها وارد VPN می‌شوند؛ دامنه‌های Whitelist داخل VPN از Proxy عبور می‌کنند." Style="{StaticResource SubtleLabel}"/>
+                    </VerticalStackLayout>
+                    <Switch Grid.Column="1" IsToggled="{Binding Settings.EnableWhitelistRouting}"/>
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource Card}">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="وب‌سایت‌ها" FontSize="19" FontAttributes="Bold" />
+                    <Label Text="دامنه را بدون مسیر وارد کن؛ زیر‌دامنه‌ها هم Match می‌شوند." Style="{StaticResource SubtleLabel}" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <Entry Placeholder="example.com" Text="{Binding NewWebsite}"/>
+                        <Button Grid.Column="1" Text="افزودن" Command="{Binding AddWebsiteCommand}" Style="{StaticResource PrimaryButton}"/>
+                    </Grid>
+                    <VerticalStackLayout BindableLayout.ItemsSource="{Binding WhitelistWebsites}" Spacing="6">
+                        <BindableLayout.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnDefinitions="*,Auto" BackgroundColor="{StaticResource Surface2}" Padding="10">
+                                    <Label Text="{Binding .}"/>
+                                    <Button Grid.Column="1" Text="حذف" Clicked="OnRemoveWebsiteClicked" Style="{StaticResource DangerButton}"/>
+                                </Grid>
+                            </DataTemplate>
+                        </BindableLayout.ItemTemplate>
+                    </VerticalStackLayout>
+                </VerticalStackLayout>
+            </Border>
+
+            <Border Style="{StaticResource Card}">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="نرم‌افزارها" FontSize="19" FontAttributes="Bold" />
+                    <Label Text="{Binding AppWhitelistHint}" Style="{StaticResource SubtleLabel}" />
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                        <Entry Grid.Column="0" Placeholder="{Binding AppWhitelistHint}" Text="{Binding NewApplication}" IsEnabled="{Binding CanAppWhitelist}"/>
+                        <Button Grid.Column="1" Text="{Binding BrowseApplicationText}" Command="{Binding BrowseApplicationCommand}" IsEnabled="{Binding CanAppWhitelist}" />
+                        <Button Grid.Column="2" Text="افزودن" Command="{Binding AddApplicationCommand}" IsEnabled="{Binding CanAppWhitelist}" Style="{StaticResource PrimaryButton}"/>
+                    </Grid>
+                    <VerticalStackLayout BindableLayout.ItemsSource="{Binding WhitelistApplications}" Spacing="6">
+                        <BindableLayout.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnDefinitions="*,Auto" BackgroundColor="{StaticResource Surface2}" Padding="10">
+                                    <VerticalStackLayout>
+                                        <Label Text="{Binding DisplayName}"/>
+                                        <Label Text="{Binding Identifier}" Style="{StaticResource SubtleLabel}"/>
+                                    </VerticalStackLayout>
+                                    <Button Grid.Column="1" Text="حذف" Clicked="OnRemoveApplicationClicked" Style="{StaticResource DangerButton}"/>
+                                </Grid>
+                            </DataTemplate>
+                        </BindableLayout.ItemTemplate>
+                    </VerticalStackLayout>
+                </VerticalStackLayout>
+            </Border>
+            <Button Text="ذخیره تنظیمات Whitelist" Command="{Binding SaveSettingsCommand}" Style="{StaticResource PrimaryButton}" />
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

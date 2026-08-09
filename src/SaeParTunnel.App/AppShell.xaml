@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Shell xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+       xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+       x:Class="SaeParTunnel.App.AppShell"
+       Shell.NavBarIsVisible="False"
+       FlyoutBehavior="Disabled"
+       BackgroundColor="{StaticResource Surface0}"
+       ForegroundColor="{StaticResource TextPrimary}"
+       TabBarBackgroundColor="{StaticResource Surface1}"
+       TabBarForegroundColor="{StaticResource TextSecondary}"
+       TabBarTitleColor="{StaticResource Accent}">
+</Shell>

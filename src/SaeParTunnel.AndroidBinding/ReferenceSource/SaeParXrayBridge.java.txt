@@ -1,0 +1,90 @@
+package com.saepar.tunnel.bridge;
+
+import android.net.VpnService;
+import android.os.ParcelFileDescriptor;
+
+import libXray.DialerController;
+import libXray.LibXray;
+
+/**
+ * Small Java shim around the official gomobile libXray AAR.
+ *
+ * Preview 20 deliberately no longer redirects a reserved /dev/null descriptor
+ * with dup2(). Xray-core v26.7.28 supports a per-config root `env` map and the
+ * Android TUN fd is injected there as `xray.tun.fd` immediately before
+ * runXrayFromJson. This is the same pattern used by the current OneXray Android
+ * implementation and avoids relying on process-environment timing after Go has
+ * already been initialized by pre-connect config tests.
+ */
+public final class SaeParXrayBridge {
+    private static final Object LOCK = new Object();
+    private static volatile VpnService activeVpnService;
+    private static boolean controllersRegistered;
+
+    private static final DialerController DIALER_CONTROLLER = new DialerController() {
+        @Override
+        public boolean protectFd(long fd) {
+            VpnService service = activeVpnService;
+            // Outside an active VPN there is nothing to protect. This keeps
+            // standalone ping/config tests working before a VPN exists.
+            return service == null || service.protect((int) fd);
+        }
+    };
+
+    private SaeParXrayBridge() { }
+
+    /** Compatibility entry point. No stable descriptor is reserved anymore. */
+    public static void initialize() {
+        // Intentionally empty. Do not initialize Go just to prepare a fake fd.
+    }
+
+    /**
+     * Associates libXray socket protection and DNS with the active VpnService.
+     * The real TUN fd itself is passed in Xray JSON via env/xray.tun.fd by C#.
+     */
+    public static void attachTun(VpnService service, ParcelFileDescriptor tunInterface, String dnsServer) throws Exception {
+        if (service == null) throw new IllegalArgumentException("VpnService is null");
+        if (tunInterface == null) throw new IllegalArgumentException("TUN interface is null");
+
+        synchronized (LOCK) {
+            activeVpnService = service;
+
+            if (!controllersRegistered) {
+                LibXray.registerDialerController(DIALER_CONTROLLER);
+                LibXray.registerListenerController(DIALER_CONTROLLER);
+                controllersRegistered = true;
+            }
+
+            LibXray.resetDNS();
+            if (dnsServer != null && !dnsServer.trim().isEmpty()) {
+                LibXray.setDNS(DIALER_CONTROLLER, dnsServer.trim());
+            }
+        }
+    }
+
+    /** Stop Xray, reset process DNS and detach the active VpnService. */
+    public static void detachTun() {
+        synchronized (LOCK) {
+            try {
+                LibXray.invoke("{\"apiVersion\":1,\"method\":\"stopXray\"}");
+            } catch (Throwable ignored) {
+            }
+            try {
+                LibXray.resetDNS();
+            } catch (Throwable ignored) {
+            }
+            activeVpnService = null;
+        }
+    }
+
+    public static String invoke(String requestJson) throws Exception {
+        synchronized (LOCK) {
+            return LibXray.invoke(requestJson);
+        }
+    }
+
+    /** Kept only for managed binding compatibility with Preview 13-19. */
+    public static int getStableTunFd() {
+        return -1;
+    }
+}

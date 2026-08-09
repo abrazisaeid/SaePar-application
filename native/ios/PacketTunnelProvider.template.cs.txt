@@ -1,0 +1,3 @@
+// TEMPLATE - intentionally not compiled in the MAUI app target.
+// Create a dedicated Network Extension project on the Mac build host and implement
+// NEPacketTunnelProvider.StartTunnel/StopTunnel around the libXray XCFramework bridge.

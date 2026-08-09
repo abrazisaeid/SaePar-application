@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SaeParTunnel.Core", "src\SaeParTunnel.Core\SaeParTunnel.Core.csproj", "{5D065A62-EB0F-48CD-A24D-4C34B27B71C4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SaeParTunnel.App", "src\SaeParTunnel.App\SaeParTunnel.App.csproj", "{E5BF1F1C-3DB4-44E6-A52E-BC0BAAD9AFC8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SaeParTunnel.AndroidBinding", "src\SaeParTunnel.AndroidBinding\SaeParTunnel.AndroidBinding.csproj", "{A2D0F534-0B35-4A8F-8D94-7AE2AF4D5C17}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A2D0F534-0B35-4A8F-8D94-7AE2AF4D5C17}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A2D0F534-0B35-4A8F-8D94-7AE2AF4D5C17}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A2D0F534-0B35-4A8F-8D94-7AE2AF4D5C17}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A2D0F534-0B35-4A8F-8D94-7AE2AF4D5C17}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5D065A62-EB0F-48CD-A24D-4C34B27B71C4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5D065A62-EB0F-48CD-A24D-4C34B27B71C4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5D065A62-EB0F-48CD-A24D-4C34B27B71C4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5D065A62-EB0F-48CD-A24D-4C34B27B71C4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E5BF1F1C-3DB4-44E6-A52E-BC0BAAD9AFC8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E5BF1F1C-3DB4-44E6-A52E-BC0BAAD9AFC8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E5BF1F1C-3DB4-44E6-A52E-BC0BAAD9AFC8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E5BF1F1C-3DB4-44E6-A52E-BC0BAAD9AFC8}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

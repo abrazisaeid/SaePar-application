@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
+    <AssemblyName>SaeParTunnel.AndroidBinding</AssemblyName>
+    <RootNamespace>SaeParTunnel.AndroidBinding</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- .NET 6+ Android binding libraries are ordinary Android class libraries.
+         Do not opt into the legacy IsBindingProject switch. -->
+
+    <!-- This project has no managed Android resources.  .NET 9 enables the
+         separate _Microsoft.Android.Resource.Designer.dll by default; the Java
+         binding generator may then try to resolve that assembly before it exists
+         and fail with BG0000/NullReferenceException. Disable both designer paths
+         for this resource-free bridge library. -->
+    <AndroidGenerateResourceDesigner>false</AndroidGenerateResourceDesigner>
+    <AndroidUseDesignerAssembly>false</AndroidUseDesignerAssembly>
+
+    <!-- Avoid the default recursive *.aar/*.jar glob because both libraries are
+         declared explicitly below with different Bind metadata. -->
+    <EnableDefaultAndroidItems>false</EnableDefaultAndroidItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Tiny public Java surface consumed by C#. -->
+    <AndroidLibrary Include="Libraries\SaeParXrayBridge.aar" Bind="true" Pack="true" />
+
+    <!-- Official XTLS libXray runtime.  It is required by the bridge and must be
+         redistributed, but we intentionally do not generate its large C# API. -->
+    <AndroidLibrary Include="Libraries\libXray.aar" Bind="false" Pack="true" />
+  </ItemGroup>
+</Project>

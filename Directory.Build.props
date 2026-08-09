@@ -1,0 +1,13 @@
+<Project>
+  <!--
+    Keep MAUI/Android generated files out of the repository tree on Windows.
+    Android generates very long Java wrapper paths, so placing obj/bin under a
+    short LocalAppData path avoids XA5301 / MAX_PATH failures even when the
+    source tree itself is extracted under Downloads.
+  -->
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT' and '$(LOCALAPPDATA)' != ''">
+    <BaseIntermediateOutputPath>$(LOCALAPPDATA)\SPTBuild\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(LOCALAPPDATA)\SPTBuild\obj\$(MSBuildProjectName)\</MSBuildProjectExtensionsPath>
+    <BaseOutputPath>$(LOCALAPPDATA)\SPTBuild\bin\$(MSBuildProjectName)\</BaseOutputPath>
+  </PropertyGroup>
+</Project>

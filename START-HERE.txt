@@ -1,0 +1,43 @@
+SaePar Tunnel Cross-platform v2.0 Preview 15 (.NET 9)
+====================================================
+
+1) پروژه را در مسیر کوتاه Extract کن، ترجیحاً:
+   C:\SPT12
+
+2) Visual Studio 2022 17.12+ و Workload زیر لازم است:
+   .NET Multi-platform App UI development
+
+3) باز کن:
+   SaeParTunnel.CrossPlatform.sln
+
+4) SaeParTunnel.App را Startup Project بگذار.
+
+Windows:
+- Windows Machine را انتخاب کن و F5 بزن.
+- Backend واقعی Xray/System Proxy در پروژه وجود دارد.
+- اگر 10808/10809 یا پورت‌های محلی تنظیم‌شده اشغال باشند، Preview 11 خودکار یک جفت پورت آزاد انتخاب می‌کند و System Proxy را روی همان پورت موفق تنظیم می‌کند.
+- انتخاب دستی xray.exe همچنان از Settings > Windows در دسترس است.
+
+Configs:
+- مرتب‌سازی پیش‌فرض: «جدیدترین اضافه‌شده».
+- Sortهای Ping، زمان تست، قدیمی/جدید و نام وجود دارند.
+- کنار هر کانفیگ CheckBox است؛ چند مورد را تیک بزن و «تست موارد تیک‌خورده» را بزن.
+- «انتخاب موارد نمایش‌داده‌شده» و «پاک کردن انتخاب» برای انتخاب گروهی وجود دارد.
+
+Android:
+- گوشی واقعی با USB debugging یا Emulator را انتخاب کن و F5 بزن.
+- فقط 120 کانفیگ ابتدا render می‌شود و Load More وجود دارد تا UI سنگین نشود.
+- Preview 15 روی Android VPN واقعی دارد: VpnService + libXray رسمی؛ اولین Connect پنجره مجوز VPN اندروید را نمایش می‌دهد.
+- تست Android اکنون Full-Proxy واقعی است و Ping همان کانفیگ را از داخل Xray اندازه می‌گیرد.
+
+Home:
+- Picker فقط Full-Test سالم‌ها را بر اساس Ping نشان می‌دهد.
+- کانفیگ انتخابی را قبل از Connect می‌توانی دوباره تست کنی.
+- پنل جداگانه Ping/Test اتصال فعلی حذف شده است.
+
+Preview 15 Android build fix:
+- SaeParXrayBridge is now a bound Android AAR (managed namespace is generated correctly).
+- Fixed System.OperationCanceledException ambiguity.
+- Fixed Android.Manifest namespace collision in SaeParVpnService.
+
+Preview 16 adds visible Android VPN permission/service/TUN/Xray connection stages and VPN settings access.

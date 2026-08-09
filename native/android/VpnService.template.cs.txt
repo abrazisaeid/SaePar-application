@@ -1,0 +1,3 @@
+// TEMPLATE - intentionally not compiled until the libXray AAR binding is added.
+// Android VpnService creates the TUN interface, applies allowed packages, obtains the fd,
+// injects xray.tun.fd into Xray config, and invokes libXray.

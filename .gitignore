@@ -9,4 +9,5 @@
 *.keystore
 *.jks
 src/SaeParTunnel.App/Resources/Raw/native-private/
+
 src/SaeParTunnel.AndroidBinding/Libraries/libXray.aar
