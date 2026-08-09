@@ -33,6 +33,8 @@ jobs:
 
           echo "f74350c907a1d172abf457058f244cdb37f263316367a4f482952e6cf989dfcd  /tmp/saepar-source.tar.xz" | sha256sum -c -
           tar -xJf /tmp/saepar-source.tar.xz -C .
+          chmod -R u+rwX,go+rX docs native scripts src || true
+          chmod u+rw .gitignore Directory.Build.props README.md SaeParTunnel.CrossPlatform.sln 2>/dev/null || true
 
           rm -f SaeParTunnel-CrossPlatform-v2.0-preview21-source.zip
           rm -rf .payload
