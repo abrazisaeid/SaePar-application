@@ -27,7 +27,7 @@ jobs:
               .payload/r_01.b64 \
               .payload/r_02.b64 \
               .payload/r_03.b64 \
-              .payload/r_04.b64 \
+              .payload/q04.b64 \
               .payload/r_05.b64 \
             | base64 -d > /tmp/saepar-source.tar.xz
 
