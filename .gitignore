@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.user
+*.suo
+*.pfx
+*.mobileprovision
+*.keystore
+*.jks
+src/SaeParTunnel.App/Resources/Raw/native-private/
+src/SaeParTunnel.AndroidBinding/Libraries/libXray.aar
