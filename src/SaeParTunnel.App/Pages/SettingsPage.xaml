@@ -44,6 +44,21 @@
                     <Label Text="منبع پیش‌فرض: Epodonios/v2ray-configs / All_Configs_Sub.txt" Style="{StaticResource SubtleLabel}" />
                 </VerticalStackLayout>
             </Border>
+            <Border Style="{StaticResource Card}">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="داده جمعی سرورها" FontSize="19" FontAttributes="Bold" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <VerticalStackLayout Grid.Column="0" Spacing="2">
+                            <Label Text="استفاده از امتیاز کاربران" VerticalOptions="Center" />
+                            <Label Text="یک فایل JSON عمومی می‌تواند سرورهای تست‌شده، Ping و نرخ موفقیت را برای رتبه‌بندی بهتر وارد کند." Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                        </VerticalStackLayout>
+                        <Switch Grid.Column="1" IsToggled="{Binding Settings.EnableCommunityHealth}" VerticalOptions="Center" />
+                    </Grid>
+                    <Entry Text="{Binding Settings.CommunityHealthIndexUrl}" Placeholder="https://raw.githubusercontent.com/owner/repo/main/ranked-profiles.json" FlowDirection="LeftToRight" />
+                    <Button Text="دریافت و اعمال داده جمعی" Command="{Binding RefreshCommunityHealthCommand}" />
+                    <Label Text="{Binding CommunityHealthStatusMessage}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                </VerticalStackLayout>
+            </Border>
             <Border Style="{StaticResource Card}" IsVisible="{Binding IsWindows}">
                 <VerticalStackLayout Spacing="12">
                     <Label Text="Windows" FontSize="19" FontAttributes="Bold" />

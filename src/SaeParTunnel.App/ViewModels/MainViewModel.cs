@@ -32,6 +32,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly MauiJsonStore _store;
     private readonly ConfigExtractor _extractor;
     private readonly GitHubConfigService _github;
+    private readonly CommunityHealthService _communityHealth;
     private readonly ITunnelService _tunnel;
     private AppSettings _settings = new();
     private ConfigProfile? _selectedProfile;
@@ -55,16 +56,18 @@ public sealed class MainViewModel : ObservableObject
     private double _progressPercent;
     private string _progressSpeed = "-", _progressEta = "-", _testGoalMessage = "";
     private string _newWebsite = "", _newApplication = "";
+    private string _communityHealthStatusMessage = "داده جمعی خاموش است. برای استفاده، یک آدرس HTTPS JSON عمومی وارد کن.";
     private string _connectionStatusMessage = "اتصال فعال نیست.";
     private string _diagnosticsReport = "هنوز عیب‌یابی اجرا نشده است.";
     private ConfigProfile? _recommendedHealthyProfile;
     private int _totalProfiles, _workingProfiles, _reachableProfiles, _failedProfiles, _untestedProfiles;
 
-    public MainViewModel(MauiJsonStore store, ConfigExtractor extractor, GitHubConfigService github, ITunnelService tunnel)
+    public MainViewModel(MauiJsonStore store, ConfigExtractor extractor, GitHubConfigService github, CommunityHealthService communityHealth, ITunnelService tunnel)
     {
-        _store = store; _extractor = extractor; _github = github; _tunnel = tunnel;
+        _store = store; _extractor = extractor; _github = github; _communityHealth = communityHealth; _tunnel = tunnel;
 
         GetConfigCommand = new Command(async () => await RunSafeAsync(GetConfigAsync));
+        RefreshCommunityHealthCommand = new Command(async () => await RunSafeAsync(async () => await RefreshCommunityHealthAsync()));
         ImportClipboardCommand = new Command(async () => await RunSafeAsync(ImportClipboardAsync));
         TestFilteredCommand = new Command(async () => await RunSafeAsync(TestFilteredAsync));
         TestSelectedCommand = new Command(async () => await RunSafeAsync(TestSelectedAsync));
@@ -138,15 +141,20 @@ public sealed class MainViewModel : ObservableObject
         ? "هنوز سرور سالمی انتخاب نشده است."
         : $"{SelectedHealthyProfile.ProtocolText} • {SelectedHealthyProfile.Endpoint} • آخرین Ping: {SelectedHealthyProfile.LatencyText}";
     private ConfigProfile? RecommendedHealthyProfile => _recommendedHealthyProfile;
+    private bool RecommendedProfileIsCommunityOnly => RecommendedHealthyProfile is { Health: not ProfileHealth.Working } profile && IsTrustedCommunityCandidate(profile);
     public bool HasRecommendedProfile => RecommendedHealthyProfile is not null;
     public bool NoRecommendedProfile => !HasRecommendedProfile;
     public string RecommendedProfileName => RecommendedHealthyProfile?.DisplayName ?? "هنوز سرور پیشنهادی نداریم";
     public string RecommendedProfileScoreText => RecommendedHealthyProfile is null
-        ? "بعد از تست سلامت ساخته می‌شود"
-        : RecommendedHealthyProfile.QualitySummaryText;
+        ? "بعد از تست سلامت یا دریافت داده جمعی ساخته می‌شود"
+        : RecommendedProfileIsCommunityOnly
+            ? $"{RecommendedHealthyProfile.QualitySummaryText} • پیشنهاد جمعی"
+            : RecommendedHealthyProfile.QualitySummaryText;
     public string RecommendedProfileDetails => RecommendedHealthyProfile is null
-        ? "از صفحه کانفیگ‌ها چند سرور سالم پیدا کن تا برنامه بهترین گزینه را خودش انتخاب کند."
-        : $"{RecommendedHealthyProfile.ProtocolText} • {RecommendedHealthyProfile.Endpoint} • {RecommendedHealthyProfile.LatencyText}";
+        ? "از صفحه کانفیگ‌ها چند سرور سالم پیدا کن یا داده جمعی سرورها را از تنظیمات دریافت کن."
+        : RecommendedProfileIsCommunityOnly
+            ? $"{RecommendedHealthyProfile.ProtocolText} • {RecommendedHealthyProfile.Endpoint} • {RecommendedHealthyProfile.CommunityHealthText} • اتصال بعد از تست اینترنت تایید می‌شود"
+            : $"{RecommendedHealthyProfile.ProtocolText} • {RecommendedHealthyProfile.Endpoint} • {RecommendedHealthyProfile.LatencyText}";
 
     public bool IsBusy
     {
@@ -204,6 +212,7 @@ public sealed class MainViewModel : ObservableObject
     public bool IsWindows => DeviceInfo.Platform == DevicePlatform.WinUI;
     public bool IsAndroid => DeviceInfo.Platform == DevicePlatform.Android;
     public string ConnectionStatusMessage { get => _connectionStatusMessage; private set => SetProperty(ref _connectionStatusMessage, value); }
+    public string CommunityHealthStatusMessage { get => _communityHealthStatusMessage; private set => SetProperty(ref _communityHealthStatusMessage, value); }
     public bool QuickMode
     {
         get => Settings.QuickMode;
@@ -313,6 +322,7 @@ public sealed class MainViewModel : ObservableObject
     public string NewApplication { get => _newApplication; set => SetProperty(ref _newApplication, value); }
 
     public Command GetConfigCommand { get; }
+    public Command RefreshCommunityHealthCommand { get; }
     public Command ImportClipboardCommand { get; }
     public Command TestFilteredCommand { get; }
     public Command TestSelectedCommand { get; }
@@ -388,6 +398,7 @@ public sealed class MainViewModel : ObservableObject
             OnPropertyChanged(nameof(AutoReconnectAttempts));
             OnPropertyChanged(nameof(ConfigModeText));
             OnPropertyChanged(nameof(ConfigModeHint));
+            RefreshCommunityHealthStatusMessage();
 
             _visibleLimit = InitialVisibleLimit();
             var loadedProfiles = await _store.LoadProfilesAsync();
@@ -396,6 +407,7 @@ public sealed class MainViewModel : ObservableObject
             WhitelistApplications.ReplaceRange(Settings.WhitelistApplications);
             RefreshFilters();
             RefreshStats();
+            RefreshCommunityHealthStatusMessage();
             IsConnected = _tunnel.IsConnected;
             StatusMessage = IsConnected ? $"VPN فعال • {BackendTitle}" : $"آماده • {BackendTitle}";
             if (DeviceInfo.Platform == DevicePlatform.Android)
@@ -442,6 +454,7 @@ public sealed class MainViewModel : ObservableObject
             }
 
             await _store.SaveSettingsAsync(Settings);
+            await TryRefreshCommunityHealthAfterConfigAsync();
             RefreshFilters();
             RefreshStats();
         }
@@ -449,6 +462,212 @@ public sealed class MainViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    private async Task TryRefreshCommunityHealthAfterConfigAsync()
+    {
+        if (!Settings.EnableCommunityHealth || string.IsNullOrWhiteSpace(Settings.CommunityHealthIndexUrl))
+        {
+            RefreshCommunityHealthStatusMessage();
+            return;
+        }
+
+        try
+        {
+            await RefreshCommunityHealthAsync(silent: true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            CommunityHealthStatusMessage = "داده جمعی فعلا دریافت نشد: " + HumanizeException(ex);
+            RefreshDiagnosticsReport();
+        }
+    }
+
+    private async Task RefreshCommunityHealthAsync(bool silent = false)
+    {
+        if (!Settings.EnableCommunityHealth)
+        {
+            CommunityHealthStatusMessage = "داده جمعی خاموش است.";
+            if (!silent) StatusMessage = CommunityHealthStatusMessage;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Settings.CommunityHealthIndexUrl))
+        {
+            CommunityHealthStatusMessage = "برای داده جمعی، آدرس HTTPS فایل ranked-profiles.json را وارد کن.";
+            if (!silent) StatusMessage = CommunityHealthStatusMessage;
+            return;
+        }
+
+        if (!silent)
+        {
+            IsBusy = true;
+            StatusMessage = "در حال دریافت داده جمعی سرورها...";
+        }
+
+        try
+        {
+            var previousETag = silent ? Settings.CommunityHealthETag : null;
+            var result = await _communityHealth.FetchAsync(Settings.CommunityHealthIndexUrl, previousETag);
+            Settings.LastCommunityHealthFetchUtc = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(result.ETag))
+                Settings.CommunityHealthETag = result.ETag;
+
+            var applied = result.NotModified
+                ? Profiles.Count(x => x.HasCommunityHealth)
+                : ApplyCommunityHealth(result.Index, result.SourceUrl);
+
+            if (!result.NotModified)
+                await _store.SaveProfilesAsync(Profiles);
+
+            await _store.SaveSettingsAsync(Settings);
+            RefreshFilters();
+            RefreshStats();
+
+            var host = Uri.TryCreate(result.SourceUrl, UriKind.Absolute, out var uri) ? uri.Host : "community";
+            var route = result.UsedDirectConnection ? "direct fallback" : "system route";
+            CommunityHealthStatusMessage = result.NotModified
+                ? $"داده جمعی تغییری نکرد • {applied:N0} کانفیگ دارای امتیاز • {host} • {route}"
+                : $"داده جمعی اعمال شد • {applied:N0} کانفیگ امتیاز گرفت • {host} • {route}";
+            if (!silent) StatusMessage = CommunityHealthStatusMessage;
+            RefreshDiagnosticsReport();
+        }
+        finally
+        {
+            if (!silent) IsBusy = false;
+        }
+    }
+
+    private int ApplyCommunityHealth(CommunityHealthIndex index, string sourceUrl)
+    {
+        var byId = new Dictionary<string, CommunityServerHealth>(StringComparer.OrdinalIgnoreCase);
+        var byEndpoint = new Dictionary<string, CommunityServerHealth>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in index.Profiles.Where(x => x is not null))
+        {
+            if (!string.IsNullOrWhiteSpace(entry.ProfileId))
+                AddBestCommunityEntry(byId, entry.ProfileId.Trim(), entry);
+
+            var endpointKey = CommunityEndpointKey(entry.Protocol, entry.Endpoint);
+            if (!string.IsNullOrWhiteSpace(endpointKey))
+                AddBestCommunityEntry(byEndpoint, endpointKey, entry);
+        }
+
+        var source = Uri.TryCreate(sourceUrl, UriKind.Absolute, out var uri) ? uri.Host : "Community";
+        var applied = 0;
+        foreach (var profile in Profiles)
+        {
+            var match = byId.TryGetValue(profile.Id, out var byIdMatch)
+                ? byIdMatch
+                : byEndpoint.TryGetValue(CommunityEndpointKey(profile.ProtocolText, profile.Endpoint), out var byEndpointMatch)
+                    ? byEndpointMatch
+                    : null;
+
+            if (match is null)
+            {
+                ClearCommunityHealth(profile);
+                continue;
+            }
+
+            profile.CommunityLatencyMs = match.MedianLatencyMs;
+            profile.CommunityScore = CalculateCommunityScore(match);
+            profile.CommunitySuccessCount = Math.Max(0, match.SuccessCount);
+            profile.CommunityFailureCount = Math.Max(0, match.FailureCount);
+            profile.CommunityLastSeenUtc = match.LastSeenUtc?.UtcDateTime;
+            profile.CommunitySource = source;
+            applied++;
+        }
+
+        return applied;
+    }
+
+    private static void AddBestCommunityEntry(
+        IDictionary<string, CommunityServerHealth> map,
+        string key,
+        CommunityServerHealth entry)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return;
+        if (!map.TryGetValue(key, out var existing) || IsBetterCommunityEntry(entry, existing))
+            map[key] = entry;
+    }
+
+    private static bool IsBetterCommunityEntry(CommunityServerHealth candidate, CommunityServerHealth existing)
+    {
+        var candidateScore = CalculateCommunityScore(candidate) ?? 0;
+        var existingScore = CalculateCommunityScore(existing) ?? 0;
+        if (candidateScore != existingScore) return candidateScore > existingScore;
+
+        if (candidate.SampleCount != existing.SampleCount) return candidate.SampleCount > existing.SampleCount;
+
+        var candidateLatency = candidate.MedianLatencyMs ?? int.MaxValue;
+        var existingLatency = existing.MedianLatencyMs ?? int.MaxValue;
+        if (candidateLatency != existingLatency) return candidateLatency < existingLatency;
+
+        return (candidate.LastSeenUtc ?? DateTimeOffset.MinValue) > (existing.LastSeenUtc ?? DateTimeOffset.MinValue);
+    }
+
+    private static string CommunityEndpointKey(string protocol, string endpoint)
+    {
+        if (string.IsNullOrWhiteSpace(protocol) || string.IsNullOrWhiteSpace(endpoint)) return string.Empty;
+        return $"{protocol.Trim().ToUpperInvariant()}|{endpoint.Trim().ToLowerInvariant()}";
+    }
+
+    private static int? CalculateCommunityScore(CommunityServerHealth entry)
+    {
+        if (entry.Score is int score)
+            return Math.Clamp(score, 0, 100);
+
+        var samples = entry.SampleCount;
+        if (samples == 0 && entry.MedianLatencyMs is null) return null;
+
+        var successRate = samples > 0
+            ? Math.Clamp(entry.SuccessRate > 0 ? entry.SuccessRate : entry.SuccessCount / (double)samples, 0d, 1d)
+            : 0.5d;
+
+        var calculated = 35 + (int)Math.Round(successRate * 45d);
+        calculated += entry.MedianLatencyMs switch
+        {
+            null => 0,
+            <= 250 => 15,
+            <= 600 => 11,
+            <= 1000 => 7,
+            <= 1800 => 3,
+            _ => 0
+        };
+        if (samples is > 0 and < 3) calculated -= 8;
+
+        return Math.Clamp(calculated, 0, 100);
+    }
+
+    private static void ClearCommunityHealth(ConfigProfile profile)
+    {
+        profile.CommunityLatencyMs = null;
+        profile.CommunityScore = null;
+        profile.CommunitySuccessCount = 0;
+        profile.CommunityFailureCount = 0;
+        profile.CommunityLastSeenUtc = null;
+        profile.CommunitySource = string.Empty;
+    }
+
+    private void RefreshCommunityHealthStatusMessage()
+    {
+        if (!Settings.EnableCommunityHealth)
+        {
+            CommunityHealthStatusMessage = "داده جمعی خاموش است. برای رتبه‌بندی مشترک، آن را روشن کن و URL بده.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Settings.CommunityHealthIndexUrl))
+        {
+            CommunityHealthStatusMessage = "داده جمعی روشن است، اما URL فایل JSON هنوز وارد نشده.";
+            return;
+        }
+
+        var last = Settings.LastCommunityHealthFetchUtc is null
+            ? "هنوز دریافت نشده"
+            : Settings.LastCommunityHealthFetchUtc.Value.ToLocalTime().ToString("yyyy/MM/dd HH:mm");
+        var scored = Profiles.Count(x => x.HasCommunityHealth);
+        CommunityHealthStatusMessage = $"آماده دریافت داده جمعی • {scored:N0} کانفیگ دارای امتیاز • آخرین دریافت: {last}";
     }
 
     private async Task ImportClipboardAsync()
@@ -862,6 +1081,26 @@ public sealed class MainViewModel : ObservableObject
         ProgressEta = rate > 0 ? $"ETA: {TimeSpan.FromSeconds(remain / rate):hh\\:mm\\:ss}" : "ETA: -";
     }
 
+    private static ConfigProfile? GetConnectableProfile(ConfigProfile? profile) =>
+        profile is null
+            ? null
+            : profile.Health == ProfileHealth.Working || IsTrustedCommunityCandidate(profile)
+                ? profile
+                : null;
+
+    private static bool IsTrustedCommunityCandidate(ConfigProfile profile)
+    {
+        if (!profile.HasCommunityHealth) return false;
+        if (profile.Health is ProfileHealth.Failed or ProfileHealth.Unsupported or ProfileHealth.Testing) return false;
+
+        var score = profile.CommunityScore ?? 0;
+        var samples = profile.CommunitySuccessCount + profile.CommunityFailureCount;
+        if (samples >= 3)
+            return score >= 65 && profile.CommunitySuccessCount >= 2;
+
+        return score >= 82;
+    }
+
     private async Task ConnectSelectedAsync()
     {
         if (IsConnected)
@@ -871,12 +1110,13 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        var candidate = SelectedHealthyProfile
-            ?? (SelectedProfile?.Health == ProfileHealth.Working ? SelectedProfile : null)
-            ?? HealthyProfiles.FirstOrDefault();
+        var candidate = GetConnectableProfile(SelectedHealthyProfile)
+            ?? GetConnectableProfile(SelectedProfile)
+            ?? HealthyProfiles.FirstOrDefault()
+            ?? RecommendedHealthyProfile;
         if (candidate is null)
         {
-            StatusMessage = "کانفیگ Full-Test سالمی برای اتصال نداریم؛ ابتدا کانفیگ‌ها را تست کن.";
+            StatusMessage = "کانفیگ Full-Test یا پیشنهاد جمعی قابل اعتماد برای اتصال نداریم؛ ابتدا کانفیگ‌ها را تست کن یا داده جمعی را دریافت کن.";
             if (Shell.Current is not null) await Shell.Current.DisplayAlert("سرور سالم پیدا نشد", StatusMessage, "باشه");
             return;
         }
@@ -989,7 +1229,7 @@ public sealed class MainViewModel : ObservableObject
         yield return first;
 
         foreach (var profile in Profiles
-                     .Where(x => x.Health == ProfileHealth.Working && x.Id != first.Id)
+                     .Where(x => x.Id != first.Id && (x.Health == ProfileHealth.Working || IsTrustedCommunityCandidate(x)))
                      .OrderByDescending(x => x.QualityScore)
                      .ThenBy(x => x.LatencyMs ?? int.MaxValue)
                      .ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase))
@@ -1009,7 +1249,7 @@ public sealed class MainViewModel : ObservableObject
     private async Task ConnectBestAsync()
     {
         var best = RecommendedHealthyProfile;
-        if (best is null) { StatusMessage = "هنوز کانفیگ Full-Test سالم نداریم."; return; }
+        if (best is null) { StatusMessage = "هنوز کانفیگ Full-Test یا پیشنهاد جمعی قابل اعتماد نداریم."; return; }
         SelectedHealthyProfile = best;
         SelectedProfile = best;
         await ConnectSelectedAsync();
@@ -1090,6 +1330,8 @@ public sealed class MainViewModel : ObservableObject
         builder.AppendLine($"System proxy: {Settings.EnableSystemProxy}");
         builder.AppendLine($"GitHub source: {Settings.GitHubSubscriptionUrl}");
         builder.AppendLine($"Last fetch: {(Settings.LastGitHubFetchUtc is null ? "-" : Settings.LastGitHubFetchUtc.Value.ToLocalTime().ToString("yyyy/MM/dd HH:mm"))}");
+        builder.AppendLine($"Community health: enabled={Settings.EnableCommunityHealth}, scored={Profiles.Count(x => x.HasCommunityHealth)}, url={Settings.CommunityHealthIndexUrl}");
+        builder.AppendLine($"Community health fetch: {(Settings.LastCommunityHealthFetchUtc is null ? "-" : Settings.LastCommunityHealthFetchUtc.Value.ToLocalTime().ToString("yyyy/MM/dd HH:mm"))}");
         if (IsWindows) builder.AppendLine($"Xray path: {(string.IsNullOrWhiteSpace(Settings.XrayPath) ? "auto" : Settings.XrayPath)}");
         DiagnosticsReport = builder.ToString().TrimEnd();
     }
@@ -1172,6 +1414,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(AutoReconnectAttempts));
         OnPropertyChanged(nameof(ConfigModeText));
         OnPropertyChanged(nameof(ConfigModeHint));
+        RefreshCommunityHealthStatusMessage();
         RefreshDiagnosticsReport();
         if (announce) StatusMessage = "تنظیمات ذخیره شد.";
     }
@@ -1365,9 +1608,14 @@ public sealed class MainViewModel : ObservableObject
             .ToList();
 
         HealthyProfiles.ReplaceRange(healthy);
-        _recommendedHealthyProfile = healthy.FirstOrDefault();
+        _recommendedHealthyProfile = healthy.FirstOrDefault() ?? Profiles
+            .Where(IsTrustedCommunityCandidate)
+            .OrderByDescending(x => x.QualityScore)
+            .ThenBy(x => x.CommunityLatencyMs ?? int.MaxValue)
+            .ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+            .FirstOrDefault();
         var next = selectedId is null ? null : healthy.FirstOrDefault(x => x.Id == selectedId);
-        next ??= _recommendedHealthyProfile;
+        next ??= healthy.FirstOrDefault();
         SelectedHealthyProfile = next;
         OnPropertyChanged(nameof(HealthyProfilesCount));
         OnPropertyChanged(nameof(HealthyProfilesCountText));

@@ -17,6 +17,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<ConfigParser>();
         builder.Services.AddSingleton<ConfigExtractor>();
         builder.Services.AddSingleton<GitHubConfigService>();
+        builder.Services.AddSingleton<CommunityHealthService>();
         builder.Services.AddSingleton<XrayConfigBuilder>();
         builder.Services.AddSingleton<EndpointPrecheckService>();
         builder.Services.AddSingleton<MauiJsonStore>();
