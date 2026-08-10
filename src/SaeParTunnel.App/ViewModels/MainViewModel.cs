@@ -57,6 +57,8 @@ public sealed class MainViewModel : ObservableObject
     private string _newWebsite = "", _newApplication = "";
     private string _connectionStatusMessage = "اتصال فعال نیست.";
     private string _diagnosticsReport = "هنوز عیب‌یابی اجرا نشده است.";
+    private ConfigProfile? _recommendedHealthyProfile;
+    private int _totalProfiles, _workingProfiles, _reachableProfiles, _failedProfiles, _untestedProfiles;
 
     public MainViewModel(MauiJsonStore store, ConfigExtractor extractor, GitHubConfigService github, ITunnelService tunnel)
     {
@@ -81,7 +83,7 @@ public sealed class MainViewModel : ObservableObject
         BrowseApplicationCommand = new Command(async () => await RunSafeAsync(BrowseApplicationAsync));
         OpenAndroidVpnSettingsCommand = new Command(async () => await RunSafeAsync(OpenAndroidVpnSettingsAsync));
         RemoveApplicationCommand = new Command<WhitelistApplication>(RemoveApplication);
-        RefreshDiagnosticsCommand = new Command(RefreshDiagnosticsReport);
+        RefreshDiagnosticsCommand = new Command(() => RefreshDiagnosticsReport());
         CopyDiagnosticsCommand = new Command(async () => await RunSafeAsync(CopyDiagnosticsAsync));
         DiagnoseConnectionCommand = new Command(async () => await RunSafeAsync(DiagnoseConnectionAsync));
 #if ANDROID
@@ -135,12 +137,7 @@ public sealed class MainViewModel : ObservableObject
     public string HealthySelectionSummary => SelectedHealthyProfile is null
         ? "هنوز سرور سالمی انتخاب نشده است."
         : $"{SelectedHealthyProfile.ProtocolText} • {SelectedHealthyProfile.Endpoint} • آخرین Ping: {SelectedHealthyProfile.LatencyText}";
-    private ConfigProfile? RecommendedHealthyProfile => Profiles
-        .Where(x => x.Health == ProfileHealth.Working)
-        .OrderByDescending(x => x.QualityScore)
-        .ThenBy(x => x.LatencyMs ?? int.MaxValue)
-        .ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase)
-        .FirstOrDefault();
+    private ConfigProfile? RecommendedHealthyProfile => _recommendedHealthyProfile;
     public bool HasRecommendedProfile => RecommendedHealthyProfile is not null;
     public bool NoRecommendedProfile => !HasRecommendedProfile;
     public string RecommendedProfileName => RecommendedHealthyProfile?.DisplayName ?? "هنوز سرور پیشنهادی نداریم";
@@ -193,6 +190,8 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!SetProperty(ref _showAdvancedConfigTools, value)) return;
             OnPropertyChanged(nameof(AdvancedConfigToolsText));
+            OnPropertyChanged(nameof(HasMoreProfiles));
+            OnPropertyChanged(nameof(VisibleProfilesLabel));
         }
     }
     public string AdvancedConfigToolsText => ShowAdvancedConfigTools ? "بستن فهرست پیشرفته" : "نمایش فهرست و فیلترهای پیشرفته";
@@ -212,10 +211,11 @@ public sealed class MainViewModel : ObservableObject
         {
             if (Settings.QuickMode == value) return;
             Settings.QuickMode = value;
-            if (!value) ShowAdvancedConfigTools = true;
+            ShowAdvancedConfigTools = !value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(ConfigModeText));
             OnPropertyChanged(nameof(ConfigModeHint));
+            RefreshFilters();
             _ = PersistSettingsAsync();
         }
     }
@@ -263,11 +263,11 @@ public sealed class MainViewModel : ObservableObject
     public string ProtocolFilter { get => _protocolFilter; set { if (SetProperty(ref _protocolFilter, value)) { _visibleLimit = InitialVisibleLimit(); RefreshFilters(); } } }
     public string SortOption { get => _sortOption; set { if (SetProperty(ref _sortOption, value)) { _visibleLimit = InitialVisibleLimit(); RefreshFilters(); } } }
 
-    public int TotalProfiles => Profiles.Count;
-    public int WorkingProfiles => Profiles.Count(x => x.Health == ProfileHealth.Working);
-    public int ReachableProfiles => Profiles.Count(x => x.Health == ProfileHealth.Reachable);
-    public int FailedProfiles => Profiles.Count(x => x.Health == ProfileHealth.Failed);
-    public int UntestedProfiles => Profiles.Count(x => x.Health == ProfileHealth.Untested);
+    public int TotalProfiles => _totalProfiles;
+    public int WorkingProfiles => _workingProfiles;
+    public int ReachableProfiles => _reachableProfiles;
+    public int FailedProfiles => _failedProfiles;
+    public int UntestedProfiles => _untestedProfiles;
     public int HealthyProfilesCount => HealthyProfiles.Count;
     public string HealthyProfilesCountText => $"{HealthyProfilesCount:N0} سالم";
     public string PrimaryConfigFlowHint => TotalProfiles == 0
@@ -283,8 +283,10 @@ public sealed class MainViewModel : ObservableObject
     public string ConfigFlowHealthSummary => $"{TotalProfiles:N0} کل • {WorkingProfiles:N0} سالم • {FailedProfiles:N0} ناموفق • {UntestedProfiles:N0} تست‌نشده";
     public int FilteredCount => _filteredSnapshot.Count;
     public int VisibleCount => FilteredProfiles.Count;
-    public bool HasMoreProfiles => VisibleCount < FilteredCount;
-    public string VisibleProfilesLabel => HasMoreProfiles ? $"نمایش {VisibleCount:N0} از {FilteredCount:N0}" : $"نمایش {FilteredCount:N0}";
+    public bool HasMoreProfiles => ShowAdvancedConfigTools && VisibleCount < FilteredCount;
+    public string VisibleProfilesLabel => ShowAdvancedConfigTools
+        ? HasMoreProfiles ? $"نمایش {VisibleCount:N0} از {FilteredCount:N0}" : $"نمایش {FilteredCount:N0}"
+        : $"{FilteredCount:N0} کانفیگ آماده بررسی";
 
     public int ProgressDone { get => _progressDone; private set => SetProperty(ref _progressDone, value); }
     public int ProgressTotal { get => _progressTotal; private set => SetProperty(ref _progressTotal, value); }
@@ -346,7 +348,6 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(CanStartConnection));
         OnPropertyChanged(nameof(CanStopConnection));
         OnPropertyChanged(nameof(ConnectionBadgeText));
-        OnPropertyChanged(nameof(DiagnosticsReport));
         ConnectCommand?.ChangeCanExecute();
         ConnectBestCommand?.ChangeCanExecute();
         DisconnectCommand?.ChangeCanExecute();
@@ -488,7 +489,11 @@ public sealed class MainViewModel : ObservableObject
         StatusMessage = "انتخاب تست پاک شد.";
     }
 
-    private void ToggleAdvancedConfigTools() => ShowAdvancedConfigTools = !ShowAdvancedConfigTools;
+    private void ToggleAdvancedConfigTools()
+    {
+        ShowAdvancedConfigTools = !ShowAdvancedConfigTools;
+        RefreshFilters();
+    }
 
     private async Task TestHealthySelectionAsync()
     {
@@ -1327,7 +1332,9 @@ public sealed class MainViewModel : ObservableObject
 
         _filteredSnapshot = query.ToList();
         if (_visibleLimit <= 0) _visibleLimit = InitialVisibleLimit();
-        FilteredProfiles.ReplaceRange(_filteredSnapshot.Take(_visibleLimit));
+        FilteredProfiles.ReplaceRange(ShowAdvancedConfigTools
+            ? _filteredSnapshot.Take(_visibleLimit)
+            : Array.Empty<ConfigProfile>());
         OnPropertyChanged(nameof(FilteredCount));
         OnPropertyChanged(nameof(VisibleCount));
         OnPropertyChanged(nameof(HasMoreProfiles));
@@ -1335,12 +1342,12 @@ public sealed class MainViewModel : ObservableObject
         NotifyConfigFlowChanged();
     }
 
-    private int InitialVisibleLimit() => DeviceInfo.Platform == DevicePlatform.WinUI ? 1000 : 120;
+    private int InitialVisibleLimit() => DeviceInfo.Platform == DevicePlatform.WinUI ? 240 : 80;
 
     private void LoadMore()
     {
         if (!HasMoreProfiles) return;
-        _visibleLimit = Math.Min(_visibleLimit + (DeviceInfo.Platform == DevicePlatform.WinUI ? 1000 : 120), FilteredCount);
+        _visibleLimit = Math.Min(_visibleLimit + (DeviceInfo.Platform == DevicePlatform.WinUI ? 240 : 80), FilteredCount);
         FilteredProfiles.ReplaceRange(_filteredSnapshot.Take(_visibleLimit));
         OnPropertyChanged(nameof(VisibleCount));
         OnPropertyChanged(nameof(HasMoreProfiles));
@@ -1358,8 +1365,9 @@ public sealed class MainViewModel : ObservableObject
             .ToList();
 
         HealthyProfiles.ReplaceRange(healthy);
+        _recommendedHealthyProfile = healthy.FirstOrDefault();
         var next = selectedId is null ? null : healthy.FirstOrDefault(x => x.Id == selectedId);
-        next ??= healthy.FirstOrDefault();
+        next ??= _recommendedHealthyProfile;
         SelectedHealthyProfile = next;
         OnPropertyChanged(nameof(HealthyProfilesCount));
         OnPropertyChanged(nameof(HealthyProfilesCountText));
@@ -1370,6 +1378,35 @@ public sealed class MainViewModel : ObservableObject
 
     private void RefreshStats()
     {
+        var working = 0;
+        var reachable = 0;
+        var failed = 0;
+        var untested = 0;
+        foreach (var profile in Profiles)
+        {
+            switch (profile.Health)
+            {
+                case ProfileHealth.Working:
+                    working++;
+                    break;
+                case ProfileHealth.Reachable:
+                    reachable++;
+                    break;
+                case ProfileHealth.Failed:
+                    failed++;
+                    break;
+                case ProfileHealth.Untested:
+                    untested++;
+                    break;
+            }
+        }
+
+        _totalProfiles = Profiles.Count;
+        _workingProfiles = working;
+        _reachableProfiles = reachable;
+        _failedProfiles = failed;
+        _untestedProfiles = untested;
+
         RefreshHealthyProfiles();
         OnPropertyChanged(nameof(TotalProfiles));
         OnPropertyChanged(nameof(WorkingProfiles));
