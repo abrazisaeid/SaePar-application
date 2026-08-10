@@ -18,6 +18,12 @@ namespace SaeParTunnel.App.Platforms.Windows;
 public sealed class WindowsTunnelService : ITunnelService
 {
     private static readonly ConcurrentDictionary<int, byte> ReservedPorts = new();
+    private static readonly string[] CurrentConnectionValidationEndpoints =
+    {
+        "https://cp.cloudflare.com/generate_204",
+        "https://www.gstatic.com/generate_204",
+        "https://www.google.com/generate_204"
+    };
     private readonly XrayConfigBuilder _builder;
     private readonly EndpointPrecheckService _precheck;
     private readonly MauiJsonStore _store;
@@ -113,36 +119,65 @@ public sealed class WindowsTunnelService : ITunnelService
         if (!IsConnected)
             return new TestResult(false, null, "Xray محلی فعال نیست.", ValidationLevel.None);
 
+        var timeout = TimeSpan.FromSeconds(settings.FastTestMode ? 3 : 5);
+        var pending = CurrentConnectionValidationEndpoints
+            .Select(endpoint => ProbeCurrentConnectionEndpointAsync(endpoint, settings.HttpPort, timeout, cancellationToken))
+            .ToList();
+        var errors = new List<string>();
+
+        while (pending.Count > 0)
+        {
+            var completed = await Task.WhenAny(pending);
+            pending.Remove(completed);
+            var result = await completed;
+            if (result.Success) return result;
+            errors.Add(result.Message);
+        }
+
+        return new TestResult(false, null, "تست اینترنت: " + string.Join(" | ", errors), ValidationLevel.FullProxy);
+    }
+
+    private static async Task<TestResult> ProbeCurrentConnectionEndpointAsync(
+        string endpoint,
+        int httpPort,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var host = new Uri(endpoint).Host;
         try
         {
             using var handler = new HttpClientHandler
             {
-                Proxy = new WebProxy($"http://127.0.0.1:{settings.HttpPort}"),
+                Proxy = new WebProxy($"http://127.0.0.1:{httpPort}"),
                 UseProxy = true,
                 AllowAutoRedirect = false
             };
-            using var client = new HttpClient(handler)
-            {
-                Timeout = TimeSpan.FromSeconds(settings.FastTestMode ? 4 : 7)
-            };
+            using var client = new HttpClient(handler) { Timeout = timeout };
             client.DefaultRequestHeaders.UserAgent.ParseAdd("SaeParTunnel/2.0");
 
             var sw = Stopwatch.StartNew();
             using var response = await client.GetAsync(
-                "https://cp.cloudflare.com/generate_204",
+                endpoint,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
             sw.Stop();
 
-            if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NoContent)
-                return new TestResult(true, (int)sw.ElapsedMilliseconds, $"Internet OK • {sw.ElapsedMilliseconds:N0} ms", ValidationLevel.FullProxy);
-
-            return new TestResult(false, null, $"HTTP {(int)response.StatusCode} از تست اینترنت.", ValidationLevel.FullProxy);
+            var code = (int)response.StatusCode;
+            return code >= 200 && code < 500
+                ? new TestResult(true, (int)sw.ElapsedMilliseconds, $"{host}=HTTP {code} • {sw.ElapsedMilliseconds:N0} ms", ValidationLevel.FullProxy)
+                : new TestResult(false, null, $"{host}=HTTP {code}", ValidationLevel.FullProxy);
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return new TestResult(false, null, $"{host}=TIMEOUT", ValidationLevel.FullProxy);
+        }
         catch (Exception ex)
         {
-            return new TestResult(false, null, "تست اینترنت: " + ex.Message, ValidationLevel.FullProxy);
+            return new TestResult(false, null, $"{host}={ex.GetBaseException().Message}", ValidationLevel.FullProxy);
         }
     }
 

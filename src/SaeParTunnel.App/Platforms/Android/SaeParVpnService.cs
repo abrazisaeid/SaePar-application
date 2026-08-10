@@ -24,6 +24,14 @@ public sealed class SaeParVpnService : VpnService
 
     private const string NotificationChannelId = "saepar_vpn";
     private const int NotificationId = 42017;
+    private static readonly TimeSpan ValidationTcpTimeout = TimeSpan.FromMilliseconds(2500);
+    private static readonly TimeSpan ValidationHttpTimeout = TimeSpan.FromMilliseconds(3500);
+    private static readonly string[] ValidationEndpoints =
+    {
+        "https://cp.cloudflare.com/generate_204",
+        "https://www.gstatic.com/generate_204",
+        "https://www.google.com/generate_204"
+    };
 
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private ParcelFileDescriptor? _vpnInterface;
@@ -258,61 +266,75 @@ public sealed class SaeParVpnService : VpnService
 
     private static async Task<(bool Success, string Message)> ValidateTunnelTrafficAsync()
     {
-        // Stage 1 deliberately avoids DNS and TLS. If this fails, packets are not
-        // traversing TUN -> Xray -> upstream at all. If it succeeds while HTTPS fails,
-        // the remaining problem is DNS/TLS rather than the TUN reader itself.
-        string tcpResult;
+        // Run probes in parallel so a blocked or slow validation endpoint does not
+        // keep the UI stuck on "testing internet" while another endpoint is healthy.
+        var tcpTask = ProbeTcpAsync();
+        var pendingHttp = ValidationEndpoints.Select(ProbeHttpAsync).ToList();
+        var errors = new List<string>();
+
+        while (pendingHttp.Count > 0)
+        {
+            var completed = await Task.WhenAny(pendingHttp).ConfigureAwait(false);
+            pendingHttp.Remove(completed);
+            var result = await completed.ConfigureAwait(false);
+            if (result.Success)
+            {
+                var tcpProbeResult = tcpTask.IsCompleted
+                    ? await tcpTask.ConfigureAwait(false)
+                    : "TCP 1.1.1.1:443=در حال بررسی";
+                return (true, $"{tcpProbeResult}; {result.Message}");
+            }
+
+            errors.Add(result.Message);
+        }
+
+        var tcpResult = await tcpTask.ConfigureAwait(false);
+        return (false, tcpResult + " | " + string.Join(" | ", errors));
+    }
+
+    private static async Task<string> ProbeTcpAsync()
+    {
         try
         {
             using var tcp = new System.Net.Sockets.TcpClient();
-            using var tcpCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var tcpCts = new CancellationTokenSource(ValidationTcpTimeout);
             await tcp.ConnectAsync("1.1.1.1", 443, tcpCts.Token).ConfigureAwait(false);
-            tcpResult = "TCP 1.1.1.1:443=OK";
+            return "TCP 1.1.1.1:443=OK";
         }
         catch (Exception ex)
         {
-            tcpResult = "TCP 1.1.1.1:443=" + NormalizeDiagnosticException(ex);
+            return "TCP 1.1.1.1:443=" + NormalizeDiagnosticException(ex);
         }
+    }
 
-        var endpoints = new[]
+    private static async Task<(bool Success, string Message)> ProbeHttpAsync(string endpoint)
+    {
+        var host = new System.Uri(endpoint).Host;
+        try
         {
-            "https://cp.cloudflare.com/generate_204",
-            "https://www.gstatic.com/generate_204",
-            "https://www.google.com/generate_204"
-        };
-
-        var errors = new List<string>();
-        foreach (var endpoint in endpoints)
-        {
-            try
+            using var handler = new HttpClientHandler
             {
-                using var handler = new HttpClientHandler
-                {
-                    UseProxy = false,
-                    AllowAutoRedirect = false
-                };
-                using var client = new HttpClient(handler)
-                {
-                    Timeout = TimeSpan.FromSeconds(5)
-                };
-                using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
-                using var response = await client.SendAsync(
-                    request,
-                    HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
-
-                var code = (int)response.StatusCode;
-                if (code >= 200 && code < 500)
-                    return (true, $"{tcpResult}; {new System.Uri(endpoint).Host}=HTTP {code}");
-
-                errors.Add($"{new System.Uri(endpoint).Host}=HTTP {code}");
-            }
-            catch (Exception ex)
+                UseProxy = false,
+                AllowAutoRedirect = false
+            };
+            using var client = new HttpClient(handler)
             {
-                errors.Add($"{new System.Uri(endpoint).Host}={NormalizeDiagnosticException(ex)}");
-            }
+                Timeout = ValidationHttpTimeout
+            };
+            using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+            using var response = await client.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+
+            var code = (int)response.StatusCode;
+            return code >= 200 && code < 500
+                ? (true, $"{host}=HTTP {code}")
+                : (false, $"{host}=HTTP {code}");
         }
-
-        return (false, tcpResult + " | " + string.Join(" | ", errors));
+        catch (Exception ex)
+        {
+            return (false, $"{host}={NormalizeDiagnosticException(ex)}");
+        }
     }
 
     private static string NormalizeDiagnosticException(Exception ex)

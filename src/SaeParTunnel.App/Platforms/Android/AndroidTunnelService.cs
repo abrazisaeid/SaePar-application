@@ -177,7 +177,7 @@ public sealed class AndroidTunnelService : ITunnelService
             : Array.Empty<string>();
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(45));
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(25));
         var wait = AndroidVpnRuntime.PrepareStartWaitAsync(timeoutCts.Token);
 
         var intent = new Intent(activity, typeof(SaeParVpnService));
@@ -202,7 +202,7 @@ public sealed class AndroidTunnelService : ITunnelService
             var stopIntent = new Intent(activity, typeof(SaeParVpnService));
             stopIntent.SetAction(SaeParVpnService.ActionDisconnect);
             activity.StartService(stopIntent);
-            throw new TimeoutException("راه‌اندازی و تست اینترنت VPN Android بیشتر از 45 ثانیه طول کشید.");
+            throw new TimeoutException("راه‌اندازی و تست اینترنت VPN Android بیشتر از 25 ثانیه طول کشید.");
         }
     }
 
