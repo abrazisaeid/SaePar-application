@@ -31,6 +31,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _initialized;
     private bool _isTesting;
     private bool _isConnected;
+    private bool _showAdvancedConfigTools;
     private string _statusMessage = "در حال آماده‌سازی...";
     private string _searchText = "";
     private string _statusFilter = "همه";
@@ -57,6 +58,7 @@ public sealed class MainViewModel : ObservableObject
         SelectVisibleCommand = new Command(SelectVisibleForTest);
         ClearSelectionCommand = new Command(ClearTestSelection);
         TestHealthySelectionCommand = new Command(async () => await RunSafeAsync(TestHealthySelectionAsync));
+        TestRecommendedCommand = new Command(async () => await RunSafeAsync(TestRecommendedAsync));
         CancelTestCommand = new Command(CancelTest);
         ConnectCommand = new Command(async () => await RunSafeAsync(ConnectSelectedAsync));
         ConnectBestCommand = new Command(async () => await RunSafeAsync(ConnectBestAsync));
@@ -74,6 +76,7 @@ public sealed class MainViewModel : ObservableObject
         _connectionStatusMessage = AndroidVpnRuntime.StatusMessage;
 #endif
         ResetFiltersCommand = new Command(() => { _visibleLimit = InitialVisibleLimit(); SearchText = ""; StatusFilter = "همه"; ProtocolFilter = "همه"; RefreshFilters(); });
+        ToggleAdvancedConfigToolsCommand = new Command(ToggleAdvancedConfigTools);
         LoadMoreCommand = new Command(LoadMore);
     }
 
@@ -119,6 +122,21 @@ public sealed class MainViewModel : ObservableObject
     public string HealthySelectionSummary => SelectedHealthyProfile is null
         ? "هنوز سرور سالمی انتخاب نشده است."
         : $"{SelectedHealthyProfile.ProtocolText} • {SelectedHealthyProfile.Endpoint} • آخرین Ping: {SelectedHealthyProfile.LatencyText}";
+    private ConfigProfile? RecommendedHealthyProfile => Profiles
+        .Where(x => x.Health == ProfileHealth.Working)
+        .OrderBy(x => x.LatencyMs ?? int.MaxValue)
+        .ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+        .FirstOrDefault();
+    public bool HasRecommendedHealthyProfile => RecommendedHealthyProfile is not null;
+    public bool HasNoRecommendedHealthyProfile => !HasRecommendedHealthyProfile;
+    public string RecommendedServerTitle => RecommendedHealthyProfile?.DisplayName ?? "هنوز گزینه پیشنهادی نداریم";
+    public string RecommendedServerMeta => RecommendedHealthyProfile is null
+        ? "بدون کانفیگ Full-Test"
+        : $"{RecommendedHealthyProfile.ProtocolText} • {RecommendedHealthyProfile.Endpoint} • {RecommendedHealthyProfile.Security}";
+    public string RecommendedServerPingText => RecommendedHealthyProfile?.LatencyText ?? "-";
+    public string RecommendedServerNote => RecommendedHealthyProfile is null
+        ? "بدون پیشنهاد فعال"
+        : "سریع‌ترین Full-Test";
 
     public bool IsBusy
     {
@@ -139,6 +157,16 @@ public sealed class MainViewModel : ObservableObject
             if (!SetProperty(ref _isConnected, value)) return;
         }
     }
+    public bool ShowAdvancedConfigTools
+    {
+        get => _showAdvancedConfigTools;
+        private set
+        {
+            if (!SetProperty(ref _showAdvancedConfigTools, value)) return;
+            OnPropertyChanged(nameof(AdvancedConfigToolsText));
+        }
+    }
+    public string AdvancedConfigToolsText => ShowAdvancedConfigTools ? "بستن فیلترها و انتخاب‌ها" : "فیلترها و انتخاب‌ها";
     public string StatusMessage { get => _statusMessage; private set => SetProperty(ref _statusMessage, value); }
     public string BackendTitle => $"{_tunnel.Capabilities.PlatformName} • {_tunnel.Capabilities.BackendName}";
     public string BackendNote => _tunnel.Capabilities.Note;
@@ -167,6 +195,11 @@ public sealed class MainViewModel : ObservableObject
     public int UntestedProfiles => Profiles.Count(x => x.Health == ProfileHealth.Untested);
     public int HealthyProfilesCount => HealthyProfiles.Count;
     public string HealthyProfilesCountText => $"{HealthyProfilesCount:N0} سالم";
+    public string PrimaryConfigFlowHint => TotalProfiles == 0
+        ? "بدون کانفیگ"
+        : WorkingProfiles == 0
+            ? "بدون کانفیگ Full-Test سالم"
+            : $"{WorkingProfiles:N0} کانفیگ Full-Test سالم آماده اتصال است.";
     public int FilteredCount => _filteredSnapshot.Count;
     public int VisibleCount => FilteredProfiles.Count;
     public bool HasMoreProfiles => VisibleCount < FilteredCount;
@@ -203,6 +236,7 @@ public sealed class MainViewModel : ObservableObject
     public Command SelectVisibleCommand { get; }
     public Command ClearSelectionCommand { get; }
     public Command TestHealthySelectionCommand { get; }
+    public Command TestRecommendedCommand { get; }
     public Command CancelTestCommand { get; }
     public Command ConnectCommand { get; }
     public Command ConnectBestCommand { get; }
@@ -216,6 +250,7 @@ public sealed class MainViewModel : ObservableObject
     public Command OpenAndroidVpnSettingsCommand { get; }
     public Command<WhitelistApplication> RemoveApplicationCommand { get; }
     public Command ResetFiltersCommand { get; }
+    public Command ToggleAdvancedConfigToolsCommand { get; }
     public Command LoadMoreCommand { get; }
 
     public async Task InitializeAsync()
@@ -331,6 +366,8 @@ public sealed class MainViewModel : ObservableObject
         StatusMessage = "انتخاب تست پاک شد.";
     }
 
+    private void ToggleAdvancedConfigTools() => ShowAdvancedConfigTools = !ShowAdvancedConfigTools;
+
     private async Task TestHealthySelectionAsync()
     {
         var profile = SelectedHealthyProfile;
@@ -354,6 +391,22 @@ public sealed class MainViewModel : ObservableObject
         {
             StatusMessage = $"این کانفیگ دیگر Full-Test سالم نیست: {profile.TestMessage}";
         }
+    }
+
+    private async Task TestRecommendedAsync()
+    {
+        var profile = RecommendedHealthyProfile;
+        if (profile is null)
+        {
+            StatusMessage = "هنوز کانفیگ سالمی برای تست مجدد پیشنهادی نداریم؛ اول یافتن سالم را اجرا کن.";
+            return;
+        }
+
+        SelectedHealthyProfile = profile;
+        SelectedProfile = profile;
+        await TestProfilesAsync(new[] { profile });
+        if (profile.Health != ProfileHealth.Working)
+            SelectedHealthyProfile = HealthyProfiles.FirstOrDefault();
     }
 
     private Task TestFilteredAsync() => TestProfilesAsync(_filteredSnapshot.ToList(), guidedHealthySearch: true);
@@ -743,10 +796,7 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task ConnectBestAsync()
     {
-        var best = Profiles
-            .Where(x => x.Health == ProfileHealth.Working && x.LatencyMs.HasValue)
-            .OrderBy(x => x.LatencyMs)
-            .FirstOrDefault();
+        var best = RecommendedHealthyProfile;
         if (best is null) { StatusMessage = "هنوز کانفیگ Full-Test سالم نداریم."; return; }
         SelectedHealthyProfile = best;
         SelectedProfile = best;
@@ -979,6 +1029,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(VisibleCount));
         OnPropertyChanged(nameof(HasMoreProfiles));
         OnPropertyChanged(nameof(VisibleProfilesLabel));
+        NotifyConfigFlowChanged();
     }
 
     private int InitialVisibleLimit() => DeviceInfo.Platform == DevicePlatform.WinUI ? 1000 : 120;
@@ -1024,6 +1075,18 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(VisibleCount));
         OnPropertyChanged(nameof(HasMoreProfiles));
         OnPropertyChanged(nameof(VisibleProfilesLabel));
+        NotifyConfigFlowChanged();
+    }
+
+    private void NotifyConfigFlowChanged()
+    {
+        OnPropertyChanged(nameof(PrimaryConfigFlowHint));
+        OnPropertyChanged(nameof(HasRecommendedHealthyProfile));
+        OnPropertyChanged(nameof(HasNoRecommendedHealthyProfile));
+        OnPropertyChanged(nameof(RecommendedServerTitle));
+        OnPropertyChanged(nameof(RecommendedServerMeta));
+        OnPropertyChanged(nameof(RecommendedServerPingText));
+        OnPropertyChanged(nameof(RecommendedServerNote));
     }
 
     private async Task RunSafeAsync(Func<Task> action)

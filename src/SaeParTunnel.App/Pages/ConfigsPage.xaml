@@ -3,133 +3,226 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="SaeParTunnel.App.Pages.ConfigsPage"
              Title="کانفیگ‌ها">
-    <Grid Padding="14" RowDefinitions="Auto,Auto,Auto,Auto,Auto,*" RowSpacing="10">
-        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
-            <VerticalStackLayout Grid.Column="0" Spacing="2">
-                <Label Text="کانفیگ‌ها" Style="{StaticResource TitleLabel}" />
-                <Label Text="{Binding VisibleProfilesLabel}" Style="{StaticResource SubtleLabel}" />
-            </VerticalStackLayout>
-            <ActivityIndicator Grid.Column="1"
-                               IsRunning="{Binding IsBusy}"
-                               IsVisible="{Binding IsBusy}"
-                               Color="{StaticResource Accent}"
-                               WidthRequest="32" HeightRequest="32"
-                               VerticalOptions="Center" />
-        </Grid>
-
-        <Border Grid.Row="1" Style="{StaticResource Card}" Padding="12,9">
-            <Label Text="{Binding StatusMessage}"
-                   TextColor="{StaticResource Accent}"
-                   LineBreakMode="WordWrap" />
-        </Border>
-
-        <VerticalStackLayout Grid.Row="2" Spacing="8">
-            <SearchBar Placeholder="نام، سرور یا منبع را جستجو کن..."
-                       Text="{Binding SearchText}" />
-            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                <Picker Grid.Column="0"
-                        Title="وضعیت"
-                        ItemsSource="{Binding StatusFilters}"
-                        SelectedItem="{Binding StatusFilter}" />
-                <Picker Grid.Column="1"
-                        Title="پروتکل"
-                        ItemsSource="{Binding ProtocolFilters}"
-                        SelectedItem="{Binding ProtocolFilter}" />
-            </Grid>
-            <Picker Title="مرتب‌سازی"
-                    ItemsSource="{Binding SortOptions}"
-                    SelectedItem="{Binding SortOption}" />
-        </VerticalStackLayout>
-
-        <Grid Grid.Row="3" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="8">
-            <Button Grid.Row="0" Grid.Column="0"
-                    Text="یافتن سالم"
-                    Command="{Binding TestFilteredCommand}"
-                    IsEnabled="{Binding IsNotBusy}"
-                    Style="{StaticResource PrimaryButton}" />
-            <Button Grid.Row="0" Grid.Column="1"
-                    Text="تست تیک‌ها"
-                    Command="{Binding TestSelectedCommand}"
-                    IsEnabled="{Binding IsNotBusy}" />
-            <Button Grid.Row="1" Grid.Column="0"
-                    Text="تیک همه"
-                    Command="{Binding SelectVisibleCommand}"
-                    IsEnabled="{Binding IsNotBusy}" />
-            <Button Grid.Row="1" Grid.Column="1"
-                    Text="پاک تیک‌ها"
-                    Command="{Binding ClearSelectionCommand}"
-                    IsEnabled="{Binding IsNotBusy}" />
-            <Button Grid.Row="2" Grid.ColumnSpan="2"
-                    Text="پاک‌کردن فیلترها"
-                    Command="{Binding ResetFiltersCommand}"
-                    IsEnabled="{Binding IsNotBusy}" />
-        </Grid>
-
-        <Border Grid.Row="4" Style="{StaticResource Card}" IsVisible="{Binding IsTesting}" Padding="12">
-            <VerticalStackLayout Spacing="7">
-                <Grid ColumnDefinitions="*,Auto">
-                    <Label Grid.Column="0" Text="در حال تست..." FontAttributes="Bold" />
-                    <Label Grid.Column="1" Text="{Binding ProgressLabel}" Style="{StaticResource SubtleLabel}" />
-                </Grid>
-                <ProgressBar Progress="{Binding ProgressFraction}" ProgressColor="{StaticResource Accent}" />
-                <Label Text="{Binding TestGoalMessage}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
-                <Label Text="{Binding ProgressHealthyLabel}" TextColor="{StaticResource Success}" FontAttributes="Bold" />
-                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                    <Label Grid.Column="0" Text="{Binding ProgressSpeed}" Style="{StaticResource SubtleLabel}" />
-                    <Label Grid.Column="1" Text="{Binding ProgressEta}" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="End" />
-                </Grid>
-                <Button Text="توقف تست"
-                        Command="{Binding CancelTestCommand}"
-                        Style="{StaticResource DangerButton}" />
-            </VerticalStackLayout>
-        </Border>
-
-        <CollectionView Grid.Row="5"
-                        ItemsSource="{Binding FilteredProfiles}"
+    <Grid Padding="14">
+        <CollectionView ItemsSource="{Binding FilteredProfiles}"
                         SelectionMode="None"
                         ItemsUpdatingScrollMode="KeepScrollOffset">
-            <CollectionView.EmptyView>
-                <VerticalStackLayout Padding="20" Spacing="6" HorizontalOptions="Center">
-                    <Label Text="کانفیگی برای نمایش نیست" FontAttributes="Bold" HorizontalTextAlignment="Center" />
-                    <Label Text="Get Config را بزن یا فیلترها را تغییر بده." Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="Center" />
-                </VerticalStackLayout>
-            </CollectionView.EmptyView>
-            <CollectionView.ItemTemplate>
-                <DataTemplate>
-                    <Border Style="{StaticResource Card}" Margin="0,4" Padding="12">
-                        <VerticalStackLayout Spacing="5">
-                            <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8">
-                                <CheckBox Grid.Column="0"
-                                          IsChecked="{Binding IsSelectedForTest}"
-                                          VerticalOptions="Center" />
-                                <Label Grid.Column="1" Text="{Binding ProtocolText}" TextColor="{StaticResource Accent}" FontAttributes="Bold" VerticalOptions="Center" />
-                                <Label Grid.Column="2" Text="{Binding DisplayName}" LineBreakMode="TailTruncation" VerticalOptions="Center" />
-                                <Label Grid.Column="3" Text="{Binding HealthText}" FontAttributes="Bold" HorizontalTextAlignment="End" VerticalOptions="Center" />
-                            </Grid>
-                            <Label Text="{Binding Endpoint}" Style="{StaticResource SubtleLabel}" LineBreakMode="TailTruncation" />
-                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
-                                <Label Grid.Column="0" Text="{Binding Network}" Style="{StaticResource SubtleLabel}" />
-                                <Label Grid.Column="1" Text="{Binding Security}" Style="{StaticResource SubtleLabel}" />
-                                <Label Grid.Column="2" Text="{Binding LatencyText}" Style="{StaticResource SubtleLabel}" />
-                            </Grid>
-                            <HorizontalStackLayout Spacing="4">
-                                <Label Text="اضافه‌شده:" Style="{StaticResource SubtleLabel}" />
-                                <Label Text="{Binding FirstSeenText}" Style="{StaticResource SubtleLabel}" />
-                            </HorizontalStackLayout>
-                        </VerticalStackLayout>
-                    </Border>
-                </DataTemplate>
-            </CollectionView.ItemTemplate>
-            <CollectionView.Footer>
-                <VerticalStackLayout Padding="0,10,0,18" Spacing="6">
-                    <Button Text="نمایش 120 مورد بعدی"
-                            Command="{Binding LoadMoreCommand}"
-                            IsVisible="{Binding HasMoreProfiles}" />
-                    <Label Text="{Binding VisibleProfilesLabel}"
-                           Style="{StaticResource SubtleLabel}"
-                           HorizontalTextAlignment="Center" />
-                </VerticalStackLayout>
-            </CollectionView.Footer>
+        <CollectionView.Header>
+            <VerticalStackLayout Spacing="10" Margin="0,0,0,8">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                    <VerticalStackLayout Grid.Column="0" Spacing="2">
+                        <Label Text="کانفیگ‌ها" Style="{StaticResource TitleLabel}" />
+                        <Label Text="{Binding VisibleProfilesLabel}" Style="{StaticResource SubtleLabel}" />
+                    </VerticalStackLayout>
+                    <ActivityIndicator Grid.Column="1"
+                                       IsRunning="{Binding IsBusy}"
+                                       IsVisible="{Binding IsBusy}"
+                                       Color="{StaticResource Accent}"
+                                       WidthRequest="32" HeightRequest="32"
+                                       VerticalOptions="Center" />
+                </Grid>
+
+                <Border Style="{StaticResource Card}" Padding="12,9">
+                    <Label Text="{Binding StatusMessage}"
+                           TextColor="{StaticResource Accent}"
+                           LineBreakMode="WordWrap" />
+                </Border>
+
+                <Border Style="{StaticResource Card}">
+                    <VerticalStackLayout Spacing="9">
+                        <Label Text="۱. ورودی" FontAttributes="Bold" FontSize="17" />
+                        <Label Text="GitHub و Clipboard" Style="{StaticResource SubtleLabel}" />
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                            <Button Grid.Column="0"
+                                    Text="دریافت کانفیگ"
+                                    Command="{Binding GetConfigCommand}"
+                                    IsEnabled="{Binding IsNotBusy}"
+                                    Style="{StaticResource PrimaryButton}" />
+                            <Button Grid.Column="1"
+                                    Text="از Clipboard"
+                                    Command="{Binding ImportClipboardCommand}"
+                                    IsEnabled="{Binding IsNotBusy}" />
+                        </Grid>
+                    </VerticalStackLayout>
+                </Border>
+
+                <Border Style="{StaticResource Card}">
+                    <VerticalStackLayout Spacing="9">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                            <VerticalStackLayout Grid.Column="0" Spacing="2">
+                                <Label Text="۲. سلامت" FontAttributes="Bold" FontSize="17" />
+                                <Label Text="{Binding PrimaryConfigFlowHint}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                            </VerticalStackLayout>
+                            <Label Grid.Column="1"
+                                   Text="{Binding HealthyProfilesCountText}"
+                                   VerticalOptions="Center"
+                                   TextColor="{StaticResource Success}"
+                                   FontAttributes="Bold" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                            <Button Grid.Column="0"
+                                    Text="یافتن سالم"
+                                    Command="{Binding TestFilteredCommand}"
+                                    IsEnabled="{Binding IsNotBusy}"
+                                    Style="{StaticResource PrimaryButton}" />
+                            <Button Grid.Column="1"
+                                    Text="تست تیک‌ها"
+                                    Command="{Binding TestSelectedCommand}"
+                                    IsEnabled="{Binding IsNotBusy}" />
+                        </Grid>
+                    </VerticalStackLayout>
+                </Border>
+
+                <Border Style="{StaticResource Card}" IsVisible="{Binding IsTesting}">
+                    <VerticalStackLayout Spacing="8">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <Label Grid.Column="0" Text="در حال تست..." FontAttributes="Bold" />
+                            <Label Grid.Column="1" Text="{Binding ProgressLabel}" Style="{StaticResource SubtleLabel}" />
+                        </Grid>
+                        <ProgressBar Progress="{Binding ProgressFraction}" ProgressColor="{StaticResource Accent}" />
+                        <Label Text="{Binding TestGoalMessage}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                        <Label Text="{Binding ProgressHealthyLabel}" TextColor="{StaticResource Success}" FontAttributes="Bold" />
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                            <Label Grid.Column="0" Text="{Binding ProgressSpeed}" Style="{StaticResource SubtleLabel}" />
+                            <Label Grid.Column="1" Text="{Binding ProgressEta}" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="End" />
+                        </Grid>
+                        <Button Text="توقف تست"
+                                Command="{Binding CancelTestCommand}"
+                                Style="{StaticResource DangerButton}" />
+                    </VerticalStackLayout>
+                </Border>
+
+                <Border Style="{StaticResource Card}" IsVisible="{Binding HasRecommendedHealthyProfile}">
+                    <VerticalStackLayout Spacing="9">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                            <VerticalStackLayout Grid.Column="0" Spacing="2">
+                                <Label Text="۳. اتصال سریع" FontAttributes="Bold" FontSize="17" />
+                                <Label Text="{Binding RecommendedServerNote}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                            </VerticalStackLayout>
+                            <Label Grid.Column="1"
+                                   Text="{Binding RecommendedServerPingText}"
+                                   VerticalOptions="Center"
+                                   TextColor="{StaticResource Accent}"
+                                   FontAttributes="Bold"
+                                   FontSize="17" />
+                        </Grid>
+                        <Label Text="{Binding RecommendedServerTitle}" FontAttributes="Bold" LineBreakMode="TailTruncation" />
+                        <Label Text="{Binding RecommendedServerMeta}" Style="{StaticResource SubtleLabel}" LineBreakMode="TailTruncation" />
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                            <Button Grid.Column="0"
+                                    Text="اتصال به پیشنهادی"
+                                    Command="{Binding ConnectBestCommand}"
+                                    IsEnabled="{Binding IsNotBusy}"
+                                    Style="{StaticResource PrimaryButton}" />
+                            <Button Grid.Column="1"
+                                    Text="تست دوباره"
+                                    Command="{Binding TestRecommendedCommand}"
+                                    IsEnabled="{Binding IsNotBusy}" />
+                        </Grid>
+                    </VerticalStackLayout>
+                </Border>
+
+                <Border Style="{StaticResource Card}" IsVisible="{Binding HasNoRecommendedHealthyProfile}">
+                    <VerticalStackLayout Spacing="9">
+                        <Label Text="۳. اتصال سریع" FontAttributes="Bold" FontSize="17" />
+                        <Label Text="{Binding RecommendedServerNote}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                        <Button Text="یافتن سالم"
+                                Command="{Binding TestFilteredCommand}"
+                                IsEnabled="{Binding IsNotBusy}"
+                                Style="{StaticResource PrimaryButton}" />
+                    </VerticalStackLayout>
+                </Border>
+
+                <Button Text="{Binding AdvancedConfigToolsText}"
+                        Command="{Binding ToggleAdvancedConfigToolsCommand}"
+                        IsEnabled="{Binding IsNotBusy}" />
+
+                <Border Style="{StaticResource Card}" IsVisible="{Binding ShowAdvancedConfigTools}">
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="فیلترها و انتخاب‌ها" FontAttributes="Bold" />
+                        <SearchBar Placeholder="نام، سرور یا منبع را جستجو کن..."
+                                   Text="{Binding SearchText}" />
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                            <Picker Grid.Column="0"
+                                    Title="وضعیت"
+                                    ItemsSource="{Binding StatusFilters}"
+                                    SelectedItem="{Binding StatusFilter}" />
+                            <Picker Grid.Column="1"
+                                    Title="پروتکل"
+                                    ItemsSource="{Binding ProtocolFilters}"
+                                    SelectedItem="{Binding ProtocolFilter}" />
+                        </Grid>
+                        <Picker Title="مرتب‌سازی"
+                                ItemsSource="{Binding SortOptions}"
+                                SelectedItem="{Binding SortOption}" />
+                        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="8">
+                            <Button Grid.Row="0" Grid.Column="0"
+                                    Text="تیک همه"
+                                    Command="{Binding SelectVisibleCommand}"
+                                    IsEnabled="{Binding IsNotBusy}" />
+                            <Button Grid.Row="0" Grid.Column="1"
+                                    Text="پاک تیک‌ها"
+                                    Command="{Binding ClearSelectionCommand}"
+                                    IsEnabled="{Binding IsNotBusy}" />
+                            <Button Grid.Row="1" Grid.ColumnSpan="2"
+                                    Text="پاک‌کردن فیلترها"
+                                    Command="{Binding ResetFiltersCommand}"
+                                    IsEnabled="{Binding IsNotBusy}" />
+                        </Grid>
+                    </VerticalStackLayout>
+                </Border>
+
+                <Grid ColumnDefinitions="*,Auto" Padding="0,4,0,0">
+                    <Label Grid.Column="0" Text="لیست کانفیگ‌ها" FontAttributes="Bold" FontSize="16" />
+                    <Label Grid.Column="1" Text="{Binding VisibleProfilesLabel}" Style="{StaticResource SubtleLabel}" VerticalOptions="Center" />
+                </Grid>
+            </VerticalStackLayout>
+        </CollectionView.Header>
+
+        <CollectionView.EmptyView>
+            <VerticalStackLayout Padding="20" Spacing="6" HorizontalOptions="Center">
+                <Label Text="کانفیگی برای نمایش نیست" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+                <Label Text="کانفیگ یا فیلتر فعالی وجود ندارد." Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="Center" />
+            </VerticalStackLayout>
+        </CollectionView.EmptyView>
+
+        <CollectionView.ItemTemplate>
+            <DataTemplate>
+                <Border Style="{StaticResource Card}" Margin="0,4" Padding="12">
+                    <VerticalStackLayout Spacing="5">
+                        <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8">
+                            <CheckBox Grid.Column="0"
+                                      IsChecked="{Binding IsSelectedForTest}"
+                                      VerticalOptions="Center" />
+                            <Label Grid.Column="1" Text="{Binding ProtocolText}" TextColor="{StaticResource Accent}" FontAttributes="Bold" VerticalOptions="Center" />
+                            <Label Grid.Column="2" Text="{Binding DisplayName}" LineBreakMode="TailTruncation" VerticalOptions="Center" />
+                            <Label Grid.Column="3" Text="{Binding HealthText}" FontAttributes="Bold" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                        </Grid>
+                        <Label Text="{Binding Endpoint}" Style="{StaticResource SubtleLabel}" LineBreakMode="TailTruncation" />
+                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+                            <Label Grid.Column="0" Text="{Binding Network}" Style="{StaticResource SubtleLabel}" />
+                            <Label Grid.Column="1" Text="{Binding Security}" Style="{StaticResource SubtleLabel}" />
+                            <Label Grid.Column="2" Text="{Binding LatencyText}" Style="{StaticResource SubtleLabel}" />
+                        </Grid>
+                        <HorizontalStackLayout Spacing="4">
+                            <Label Text="اضافه‌شده:" Style="{StaticResource SubtleLabel}" />
+                            <Label Text="{Binding FirstSeenText}" Style="{StaticResource SubtleLabel}" />
+                        </HorizontalStackLayout>
+                    </VerticalStackLayout>
+                </Border>
+            </DataTemplate>
+        </CollectionView.ItemTemplate>
+
+        <CollectionView.Footer>
+            <VerticalStackLayout Padding="0,10,0,18" Spacing="6">
+                <Button Text="نمایش 120 مورد بعدی"
+                        Command="{Binding LoadMoreCommand}"
+                        IsVisible="{Binding HasMoreProfiles}" />
+                <Label Text="{Binding VisibleProfilesLabel}"
+                       Style="{StaticResource SubtleLabel}"
+                       HorizontalTextAlignment="Center" />
+            </VerticalStackLayout>
+        </CollectionView.Footer>
         </CollectionView>
     </Grid>
 </ContentPage>
