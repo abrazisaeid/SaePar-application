@@ -9,4 +9,12 @@ Target architecture:
 4. Put `xray.tun.fd` in the root Xray config `env` object before invoking libXray.
 5. Apply `VpnService.Builder.AddAllowedApplication(packageName)` for the application whitelist.
 
+Build restore:
+- `SaeParTunnel.AndroidBinding` restores the official XTLS/libXray `v26.7.28`
+  Android release asset automatically when `Libraries/libXray.aar` is missing.
+- The downloaded `libxray-android.zip` and extracted `libXray.aar` are verified
+  with SHA-256 before the binding project continues.
+- `Libraries/libXray.aar` remains git-ignored because it is a large generated
+  runtime artifact; the project file is the source of truth for restoring it.
+
 Do not commit private signing keys or user VPN state.

@@ -27,7 +27,7 @@ a6aacc17bffbd558a173388fca68065ecdf07ebf5dd05a333c64c236ab2cd03c  ./THIRD-PARTY-
 6921cf9ee172ba0812ba2254f1afec7a7e3c34172656b81dfe63a51c009e0ece  ./VALIDATION.md
 110c83b6f2cb304da18fed3776bd03c9fe6d88ec2a09f4dac7145e0da6fd1dca  ./docs/ARCHITECTURE.md
 2693f0081d22422714daa1d306742a5654d9d856ad0a84151b179adac6b789b0  ./global.json
-a7bbcac521448d166faa5de4de2438a5da458c63b1b124a92df7d00a18f5a473  ./native/android/README.md
+dbca1000edbfad93f598389e34c102c7e1b107d9b4182c9c16b3aaf5f08b2ce9  ./native/android/README.md
 f49469de4e28216e0446a80bafbcdf017eb74ff775ab7964e69021e2ca2f8600  ./native/android/VpnService.template.cs.txt
 ea01b137c5694b21a8bea5feea0554d4fdcd4cfccaa56902cb9cbfe750fd8d67  ./native/android/build-libxray.sh
 aa71402a8cc64ffd7082dd35139f8710f788a79be8ee11ae67dc8f5bfa696987  ./native/ios/PacketTunnelProvider.template.cs.txt
@@ -41,7 +41,7 @@ c5b4468f130af791227101c0cb72e9141ac3d81ec3ceb8403fa54e480eba90fc  ./scripts/setu
 33bf70459c6545477c1851380b22ca79b71df7bd494315eb124c125a71209f0a  ./src/SaeParTunnel.AndroidBinding/Libraries/SaeParXrayBridge.aar
 4708a361a74f7e955635dbe3661cefb459bdc867423c3b1826a2c5a6ea4ac77d  ./src/SaeParTunnel.AndroidBinding/Libraries/libXray.aar
 d61267f832b68813d7babc5e78079c616334b11d02426be4c8a3ca5f930b6e6f  ./src/SaeParTunnel.AndroidBinding/ReferenceSource/SaeParXrayBridge.java.txt
-15ac5e449f9368d7bba6f9c8b4264ad6da56bc99ff5bf2d09dc7d27caaaca155  ./src/SaeParTunnel.AndroidBinding/SaeParTunnel.AndroidBinding.csproj
+88049def4e8cd55cc29fc94da38745dead6989aa7bb3afd577eeb7a50e7e91ee  ./src/SaeParTunnel.AndroidBinding/SaeParTunnel.AndroidBinding.csproj
 bf572baa92c2c760a56fe96cbe1040e796f58989c126f7647f80022fda08922c  ./src/SaeParTunnel.App/App.xaml
 13148702413df22769861cca04ee354ea343c9bd4fb95ae92a9752261aa7f249  ./src/SaeParTunnel.App/App.xaml.cs
 80e59263902d4fd06fd728da8215f997adf5a5d2c1fc04dc833a9217494e8140  ./src/SaeParTunnel.App/AppShell.xaml
@@ -60,7 +60,7 @@ f0eb8638dfcc6f830aa59001b56f0eb406f951244170473d344f0338fc181616  ./src/SaeParTu
 39304febba2e3a0e0b416055af87ba99608108c9781018e4a854170d57c2fda8  ./src/SaeParTunnel.App/Platforms/Android/AndroidVpnRuntime.cs
 c12a06034cc9c6233412a360c2984c28e264725da528fd806c286cb04371e515  ./src/SaeParTunnel.App/Platforms/Android/MainActivity.cs
 ab9c7d80e4456395e0c98d9a74dfd129396bc4ad6a8671d2f5b4789dd5320dc9  ./src/SaeParTunnel.App/Platforms/Android/MainApplication.cs
-b286be478cf810ba69345977f61998c617436292067fb2fb25b48f4ad27d9272  ./src/SaeParTunnel.App/Platforms/Android/SaeParVpnService.cs
+c3a06c6fa06ce7d7f791c0d25b14e48965c570edf5b18533751c51055d90e7ad  ./src/SaeParTunnel.App/Platforms/Android/SaeParVpnService.cs
 b07a4f9158ca2f002019267e3b32db107f792abe1f4a2213dc0c81b81d693e9c  ./src/SaeParTunnel.App/Platforms/Windows/App.xaml
 947913e30b79b4d53299f369efda08ac21f8353335736ae972149a74541eb9d5  ./src/SaeParTunnel.App/Platforms/Windows/App.xaml.cs
 e3b023b7caf8791a84786b1ab6937530cb398b714d9f06bc900ccea0945ea16e  ./src/SaeParTunnel.App/Platforms/Windows/Package.appxmanifest

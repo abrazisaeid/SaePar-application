@@ -315,13 +315,13 @@ public sealed class SaeParVpnService : VpnService
 
                 var code = (int)response.StatusCode;
                 if (code >= 200 && code < 500)
-                    return (true, $"{tcpResult}; {new Uri(endpoint).Host}=HTTP {code}");
+                    return (true, $"{tcpResult}; {new System.Uri(endpoint).Host}=HTTP {code}");
 
-                errors.Add($"{new Uri(endpoint).Host}=HTTP {code}");
+                errors.Add($"{new System.Uri(endpoint).Host}=HTTP {code}");
             }
             catch (Exception ex)
             {
-                errors.Add($"{new Uri(endpoint).Host}={NormalizeDiagnosticException(ex)}");
+                errors.Add($"{new System.Uri(endpoint).Host}={NormalizeDiagnosticException(ex)}");
             }
         }
 

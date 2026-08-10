@@ -21,7 +21,52 @@
     <!-- Avoid the default recursive *.aar/*.jar glob because both libraries are
          declared explicitly below with different Bind metadata. -->
     <EnableDefaultAndroidItems>false</EnableDefaultAndroidItems>
+
+    <LibXrayVersion>v26.7.28</LibXrayVersion>
+    <LibXrayAndroidZipUrl>https://github.com/XTLS/libXray/releases/download/$(LibXrayVersion)/libxray-android.zip</LibXrayAndroidZipUrl>
+    <LibXrayAndroidZipSha256>28b7dc9d6cc8455fcca5cbd56e387003a7bfb558128651a64899dc3a8ccff666</LibXrayAndroidZipSha256>
+    <LibXrayAarSha256>4708a361a74f7e955635dbe3661cefb459bdc867423c3b1826a2c5a6ea4ac77d</LibXrayAarSha256>
+    <LibXrayRestoreRoot>$(BaseIntermediateOutputPath)libxray\$(LibXrayVersion)\</LibXrayRestoreRoot>
+    <LibXrayAndroidZip>$(LibXrayRestoreRoot)libxray-android.zip</LibXrayAndroidZip>
+    <LibXrayExtractRoot>$(LibXrayRestoreRoot)extract\</LibXrayExtractRoot>
+    <LibXrayExtractedAar>$(LibXrayExtractRoot)libxray-android\libXray.aar</LibXrayExtractedAar>
+    <LibXrayAarPath>$(MSBuildProjectDirectory)\Libraries\libXray.aar</LibXrayAarPath>
   </PropertyGroup>
+
+  <Target Name="EnsureLibXrayAar"
+          BeforeTargets="PrepareForBuild"
+          DependsOnTargets="RestoreLibXrayAar;VerifyLibXrayAar" />
+
+  <Target Name="RestoreLibXrayAar"
+          Condition="!Exists('$(LibXrayAarPath)')">
+    <Message Importance="High"
+             Text="Restoring XTLS libXray $(LibXrayVersion) Android AAR..." />
+    <MakeDir Directories="$(LibXrayRestoreRoot);$(LibXrayExtractRoot)" />
+    <DownloadFile SourceUrl="$(LibXrayAndroidZipUrl)"
+                  DestinationFolder="$(LibXrayRestoreRoot)"
+                  DestinationFileName="libxray-android.zip"
+                  Retries="3"
+                  RetryDelayMilliseconds="3000"
+                  SkipUnchangedFiles="false" />
+    <VerifyFileHash File="$(LibXrayAndroidZip)"
+                    Hash="$(LibXrayAndroidZipSha256)"
+                    Algorithm="SHA256" />
+    <Unzip SourceFiles="$(LibXrayAndroidZip)"
+           DestinationFolder="$(LibXrayExtractRoot)"
+           OverwriteReadOnlyFiles="true"
+           SkipUnchangedFiles="true" />
+    <Error Condition="!Exists('$(LibXrayExtractedAar)')"
+           Text="libXray.aar was not found inside $(LibXrayAndroidZip)." />
+    <Copy SourceFiles="$(LibXrayExtractedAar)"
+          DestinationFiles="$(LibXrayAarPath)" />
+  </Target>
+
+  <Target Name="VerifyLibXrayAar"
+          Condition="Exists('$(LibXrayAarPath)')">
+    <VerifyFileHash File="$(LibXrayAarPath)"
+                    Hash="$(LibXrayAarSha256)"
+                    Algorithm="SHA256" />
+  </Target>
 
   <ItemGroup>
     <!-- Tiny public Java surface consumed by C#. -->
