@@ -2,7 +2,7 @@ namespace SaeParTunnel.Core.Models;
 
 public sealed class AppSettings
 {
-    public int DataSchemaVersion { get; set; } = 23;
+    public int DataSchemaVersion { get; set; } = 24;
     public string XrayPath { get; set; } = string.Empty;
     public int SocksPort { get; set; } = 10808;
     public int HttpPort { get; set; } = 10809;
@@ -12,6 +12,9 @@ public sealed class AppSettings
     public bool RemoveDuplicates { get; set; } = true;
     public int TestConcurrency { get; set; } = 0;
     public bool FastTestMode { get; set; } = true;
+    public bool QuickMode { get; set; } = true;
+    public bool AutoReconnect { get; set; } = true;
+    public int AutoReconnectAttempts { get; set; } = 3;
 
     public bool EnableWhitelistRouting { get; set; }
     public List<WhitelistApplication> WhitelistApplications { get; set; } = new();

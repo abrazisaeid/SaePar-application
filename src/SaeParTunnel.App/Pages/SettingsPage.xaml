@@ -7,6 +7,30 @@
             <Label Text="تنظیمات" Style="{StaticResource TitleLabel}" />
             <Border Style="{StaticResource Card}">
                 <VerticalStackLayout Spacing="12">
+                    <Label Text="تجربه کاربری" FontSize="19" FontAttributes="Bold" />
+                    <Grid ColumnDefinitions="*,Auto">
+                        <VerticalStackLayout Grid.Column="0" Spacing="2">
+                            <Label Text="حالت سریع" VerticalOptions="Center" />
+                            <Label Text="برای استفاده روزمره، مسیر اصلی را ساده و خلوت نگه می‌دارد." Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                        </VerticalStackLayout>
+                        <Switch Grid.Column="1" IsToggled="{Binding QuickMode}" VerticalOptions="Center" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <VerticalStackLayout Grid.Column="0" Spacing="2">
+                            <Label Text="اتصال مجدد هوشمند" VerticalOptions="Center" />
+                            <Label Text="اگر سرور اول تأیید نشد، چند سرور سالم بعدی خودکار امتحان می‌شود." Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                        </VerticalStackLayout>
+                        <Switch Grid.Column="1" IsToggled="{Binding AutoReconnect}" VerticalOptions="Center" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,120">
+                        <Label Text="تعداد تلاش اتصال مجدد" VerticalOptions="Center" />
+                        <Entry Grid.Column="1" Keyboard="Numeric" Text="{Binding AutoReconnectAttempts}" />
+                    </Grid>
+                    <Label Text="{Binding ReleaseVersionText}" Style="{StaticResource SubtleLabel}" />
+                </VerticalStackLayout>
+            </Border>
+            <Border Style="{StaticResource Card}">
+                <VerticalStackLayout Spacing="12">
                     <Label Text="موتور تست" FontSize="19" FontAttributes="Bold" />
                     <Grid ColumnDefinitions="*,120"><Label Text="تعداد تست هم‌زمان" VerticalOptions="Center"/><Entry Grid.Column="1" Keyboard="Numeric" Text="{Binding Settings.TestConcurrency}"/></Grid>
                     <Grid ColumnDefinitions="*,Auto"><Label Text="Fast Test" VerticalOptions="Center"/><Switch Grid.Column="1" IsToggled="{Binding Settings.FastTestMode}"/></Grid>

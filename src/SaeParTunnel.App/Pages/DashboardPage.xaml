@@ -93,6 +93,7 @@
                             IsEnabled="{Binding CanStartConnection}" />
 
                     <Label Text="{Binding HealthySelectionSummary}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                    <Label Text="{Binding RecommendedProfileScoreText}" TextColor="{StaticResource Success}" FontAttributes="Bold" />
 
                     <VerticalStackLayout Spacing="8">
                         <Button Text="اتصال"

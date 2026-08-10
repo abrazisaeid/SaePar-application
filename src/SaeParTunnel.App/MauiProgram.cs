@@ -34,6 +34,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<MainViewModel>();
         builder.Services.AddSingleton<DashboardPage>();
         builder.Services.AddSingleton<ConfigsPage>();
+        builder.Services.AddSingleton<DiagnosticsPage>();
         builder.Services.AddSingleton<WhitelistPage>();
         builder.Services.AddSingleton<SettingsPage>();
         builder.Services.AddSingleton<AppShell>();

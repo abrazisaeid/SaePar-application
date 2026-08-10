@@ -11,6 +11,7 @@ public sealed class ConfigProfile : INotifyPropertyChanged
     private DateTime? _lastTested;
     private string _testMessage = string.Empty;
     private bool _isSelectedForTest;
+    private int _failureCount;
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public ProxyProtocol Protocol { get; set; }
@@ -41,7 +42,20 @@ public sealed class ConfigProfile : INotifyPropertyChanged
     public string Source { get; set; } = "دستی";
     public DateTime FirstSeen { get; set; } = DateTime.Now;
     public DateTime LastSeen { get; set; } = DateTime.Now;
-    public int FailureCount { get; set; }
+    public int FailureCount
+    {
+        get => _failureCount;
+        set
+        {
+            if (_failureCount == value) return;
+            _failureCount = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(QualityScore));
+            OnPropertyChanged(nameof(QualityText));
+            OnPropertyChanged(nameof(QualitySummaryText));
+            OnPropertyChanged(nameof(PickerDisplayText));
+        }
+    }
 
     public ProfileHealth Health
     {
@@ -52,6 +66,9 @@ public sealed class ConfigProfile : INotifyPropertyChanged
             _health = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(HealthText));
+            OnPropertyChanged(nameof(QualityScore));
+            OnPropertyChanged(nameof(QualityText));
+            OnPropertyChanged(nameof(QualitySummaryText));
             OnPropertyChanged(nameof(PickerDisplayText));
         }
     }
@@ -65,6 +82,9 @@ public sealed class ConfigProfile : INotifyPropertyChanged
             _latencyMs = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(LatencyText));
+            OnPropertyChanged(nameof(QualityScore));
+            OnPropertyChanged(nameof(QualityText));
+            OnPropertyChanged(nameof(QualitySummaryText));
             OnPropertyChanged(nameof(PickerDisplayText));
         }
     }
@@ -72,7 +92,16 @@ public sealed class ConfigProfile : INotifyPropertyChanged
     public DateTime? LastTested
     {
         get => _lastTested;
-        set { if (_lastTested != value) { _lastTested = value; OnPropertyChanged(); } }
+        set
+        {
+            if (_lastTested == value) return;
+            _lastTested = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(QualityScore));
+            OnPropertyChanged(nameof(QualityText));
+            OnPropertyChanged(nameof(QualitySummaryText));
+            OnPropertyChanged(nameof(PickerDisplayText));
+        }
     }
 
     public string TestMessage
@@ -102,7 +131,54 @@ public sealed class ConfigProfile : INotifyPropertyChanged
         _ => "-"
     };
     [JsonIgnore] public string LatencyText => LatencyMs is null ? "-" : $"{LatencyMs} ms";
-    [JsonIgnore] public string PickerDisplayText => $"{LatencyText}  •  {ProtocolText}  •  {DisplayName}  •  {Endpoint}";
+    [JsonIgnore] public int QualityScore
+    {
+        get
+        {
+            var score = Health switch
+            {
+                ProfileHealth.Working => 70,
+                ProfileHealth.Reachable => 38,
+                ProfileHealth.Untested => 18,
+                ProfileHealth.Testing => 12,
+                ProfileHealth.Failed => 4,
+                _ => 0
+            };
+
+            score += LatencyMs switch
+            {
+                null => 0,
+                <= 250 => 20,
+                <= 600 => 15,
+                <= 1000 => 9,
+                <= 1800 => 4,
+                _ => 1
+            };
+
+            if (LastTested is DateTime tested)
+            {
+                var age = DateTime.Now - tested;
+                score += age.TotalHours <= 6 ? 6 : age.TotalDays <= 1 ? 4 : age.TotalDays <= 7 ? 2 : 0;
+            }
+
+            if (Security.Equals("reality", StringComparison.OrdinalIgnoreCase) ||
+                Security.Equals("tls", StringComparison.OrdinalIgnoreCase))
+                score += 3;
+
+            score -= Math.Min(FailureCount * 8, 32);
+            return Math.Clamp(score, 0, 99);
+        }
+    }
+    [JsonIgnore] public string QualityText => QualityScore switch
+    {
+        >= 88 => "عالی",
+        >= 72 => "خوب",
+        >= 52 => "قابل قبول",
+        >= 20 => "ضعیف",
+        _ => "ناموفق"
+    };
+    [JsonIgnore] public string QualitySummaryText => $"{QualityText} • امتیاز {QualityScore}/100";
+    [JsonIgnore] public string PickerDisplayText => $"{QualitySummaryText}  •  {LatencyText}  •  {ProtocolText}  •  {DisplayName}  •  {Endpoint}";
     [JsonIgnore] public string FirstSeenText => FirstSeen.ToString("yyyy/MM/dd HH:mm");
 
     [JsonIgnore]

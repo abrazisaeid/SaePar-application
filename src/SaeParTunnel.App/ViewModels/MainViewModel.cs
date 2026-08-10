@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Controls;
@@ -45,7 +46,7 @@ public sealed class MainViewModel : ObservableObject
     private string _searchText = "";
     private string _statusFilter = "همه";
     private string _protocolFilter = "همه";
-    private string _sortOption = "جدیدترین اضافه‌شده";
+    private string _sortOption = "بهترین امتیاز";
     private CancellationTokenSource? _testCts;
     private int _progressDone, _progressTotal, _progressWorking, _progressFailed, _progressFullWorking;
     private List<ConfigProfile> _filteredSnapshot = new();
@@ -55,6 +56,7 @@ public sealed class MainViewModel : ObservableObject
     private string _progressSpeed = "-", _progressEta = "-", _testGoalMessage = "";
     private string _newWebsite = "", _newApplication = "";
     private string _connectionStatusMessage = "اتصال فعال نیست.";
+    private string _diagnosticsReport = "هنوز عیب‌یابی اجرا نشده است.";
 
     public MainViewModel(MauiJsonStore store, ConfigExtractor extractor, GitHubConfigService github, ITunnelService tunnel)
     {
@@ -79,11 +81,14 @@ public sealed class MainViewModel : ObservableObject
         BrowseApplicationCommand = new Command(async () => await RunSafeAsync(BrowseApplicationAsync));
         OpenAndroidVpnSettingsCommand = new Command(async () => await RunSafeAsync(OpenAndroidVpnSettingsAsync));
         RemoveApplicationCommand = new Command<WhitelistApplication>(RemoveApplication);
+        RefreshDiagnosticsCommand = new Command(RefreshDiagnosticsReport);
+        CopyDiagnosticsCommand = new Command(async () => await RunSafeAsync(CopyDiagnosticsAsync));
+        DiagnoseConnectionCommand = new Command(async () => await RunSafeAsync(DiagnoseConnectionAsync));
 #if ANDROID
         AndroidVpnRuntime.StatusChanged += OnAndroidVpnStatusChanged;
         _connectionStatusMessage = AndroidVpnRuntime.StatusMessage;
 #endif
-        ResetFiltersCommand = new Command(() => { _visibleLimit = InitialVisibleLimit(); SearchText = ""; StatusFilter = "همه"; ProtocolFilter = "همه"; RefreshFilters(); });
+        ResetFiltersCommand = new Command(() => { _visibleLimit = InitialVisibleLimit(); SearchText = ""; StatusFilter = "همه"; ProtocolFilter = "همه"; SortOption = "بهترین امتیاز"; RefreshFilters(); });
         ToggleAdvancedConfigToolsCommand = new Command(ToggleAdvancedConfigTools);
         LoadMoreCommand = new Command(LoadMore);
     }
@@ -95,7 +100,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableRangeCollection<WhitelistApplication> WhitelistApplications { get; } = new();
     public IReadOnlyList<string> StatusFilters { get; } = new[] { "همه", "سالم", "TCP قابل دسترس", "ناموفق", "تست نشده", "پشتیبانی‌نشده" };
     public IReadOnlyList<string> ProtocolFilters { get; } = new[] { "همه", "VLESS", "VMess", "Trojan", "Shadowsocks" };
-    public IReadOnlyList<string> SortOptions { get; } = new[] { "جدیدترین اضافه‌شده", "قدیمی‌ترین اضافه‌شده", "کمترین Ping", "بیشترین Ping", "جدیدترین تست", "نام" };
+    public IReadOnlyList<string> SortOptions { get; } = new[] { "بهترین امتیاز", "جدیدترین اضافه‌شده", "قدیمی‌ترین اضافه‌شده", "کمترین Ping", "بیشترین Ping", "جدیدترین تست", "نام" };
 
     public AppSettings Settings { get => _settings; private set => SetProperty(ref _settings, value); }
     public ConfigProfile? SelectedProfile
@@ -132,9 +137,19 @@ public sealed class MainViewModel : ObservableObject
         : $"{SelectedHealthyProfile.ProtocolText} • {SelectedHealthyProfile.Endpoint} • آخرین Ping: {SelectedHealthyProfile.LatencyText}";
     private ConfigProfile? RecommendedHealthyProfile => Profiles
         .Where(x => x.Health == ProfileHealth.Working)
-        .OrderBy(x => x.LatencyMs ?? int.MaxValue)
+        .OrderByDescending(x => x.QualityScore)
+        .ThenBy(x => x.LatencyMs ?? int.MaxValue)
         .ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase)
         .FirstOrDefault();
+    public bool HasRecommendedProfile => RecommendedHealthyProfile is not null;
+    public bool NoRecommendedProfile => !HasRecommendedProfile;
+    public string RecommendedProfileName => RecommendedHealthyProfile?.DisplayName ?? "هنوز سرور پیشنهادی نداریم";
+    public string RecommendedProfileScoreText => RecommendedHealthyProfile is null
+        ? "بعد از تست سلامت ساخته می‌شود"
+        : RecommendedHealthyProfile.QualitySummaryText;
+    public string RecommendedProfileDetails => RecommendedHealthyProfile is null
+        ? "از صفحه کانفیگ‌ها چند سرور سالم پیدا کن تا برنامه بهترین گزینه را خودش انتخاب کند."
+        : $"{RecommendedHealthyProfile.ProtocolText} • {RecommendedHealthyProfile.Endpoint} • {RecommendedHealthyProfile.LatencyText}";
 
     public bool IsBusy
     {
@@ -180,7 +195,7 @@ public sealed class MainViewModel : ObservableObject
             OnPropertyChanged(nameof(AdvancedConfigToolsText));
         }
     }
-    public string AdvancedConfigToolsText => ShowAdvancedConfigTools ? "بستن فیلترها و انتخاب‌ها" : "فیلترها و انتخاب‌ها";
+    public string AdvancedConfigToolsText => ShowAdvancedConfigTools ? "بستن فهرست پیشرفته" : "نمایش فهرست و فیلترهای پیشرفته";
     public string StatusMessage { get => _statusMessage; private set => SetProperty(ref _statusMessage, value); }
     public string BackendTitle => $"{_tunnel.Capabilities.PlatformName} • {_tunnel.Capabilities.BackendName}";
     public string BackendNote => _tunnel.Capabilities.Note;
@@ -190,6 +205,52 @@ public sealed class MainViewModel : ObservableObject
     public bool IsWindows => DeviceInfo.Platform == DevicePlatform.WinUI;
     public bool IsAndroid => DeviceInfo.Platform == DevicePlatform.Android;
     public string ConnectionStatusMessage { get => _connectionStatusMessage; private set => SetProperty(ref _connectionStatusMessage, value); }
+    public bool QuickMode
+    {
+        get => Settings.QuickMode;
+        set
+        {
+            if (Settings.QuickMode == value) return;
+            Settings.QuickMode = value;
+            if (!value) ShowAdvancedConfigTools = true;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ConfigModeText));
+            OnPropertyChanged(nameof(ConfigModeHint));
+            _ = PersistSettingsAsync();
+        }
+    }
+    public bool AutoReconnect
+    {
+        get => Settings.AutoReconnect;
+        set
+        {
+            if (Settings.AutoReconnect == value) return;
+            Settings.AutoReconnect = value;
+            OnPropertyChanged();
+            RefreshDiagnosticsReport();
+            _ = PersistSettingsAsync();
+        }
+    }
+    public int AutoReconnectAttempts
+    {
+        get => Settings.AutoReconnectAttempts;
+        set
+        {
+            var normalized = Math.Clamp(value <= 0 ? 3 : value, 1, 5);
+            if (Settings.AutoReconnectAttempts == normalized) return;
+            Settings.AutoReconnectAttempts = normalized;
+            OnPropertyChanged();
+            RefreshDiagnosticsReport();
+            _ = PersistSettingsAsync();
+        }
+    }
+    public string ConfigModeText => QuickMode ? "حالت سریع" : "حالت حرفه‌ای";
+    public string ConfigModeHint => QuickMode
+        ? "برنامه مسیر اصلی را ساده نگه می‌دارد و ابزارهای سنگین را پشت جزئیات می‌گذارد."
+        : "فیلترها، انتخاب دستی و لیست کامل برای بررسی دقیق باز می‌ماند.";
+    public string ReleaseVersionText => $"SaePar Tunnel {AppInfo.Current.VersionString} ({AppInfo.Current.BuildString})";
+    public string RuntimeSummaryText => $"{DeviceInfo.Platform} • {DeviceInfo.Model} • {DeviceInfo.VersionString}";
+    public string DiagnosticsReport { get => _diagnosticsReport; private set => SetProperty(ref _diagnosticsReport, value); }
     public string AppWhitelistHint => DeviceInfo.Platform == DevicePlatform.Android
         ? "برنامه را انتخاب کن یا Package ID مثل org.telegram.messenger وارد کن"
         : DeviceInfo.Platform == DevicePlatform.WinUI
@@ -214,6 +275,12 @@ public sealed class MainViewModel : ObservableObject
         : WorkingProfiles == 0
             ? "بدون کانفیگ Full-Test سالم"
             : $"{WorkingProfiles:N0} کانفیگ Full-Test سالم آماده اتصال است.";
+    public string ConfigFlowNextStep => TotalProfiles == 0
+        ? "اول کانفیگ‌ها را از GitHub یا Clipboard وارد کن."
+        : WorkingProfiles == 0
+            ? "حالا تست سلامت را اجرا کن تا چند سرور قابل اعتماد پیدا شود."
+            : "بهترین سرور آماده است؛ می‌توانی از خانه با اتصال سریع وصل شوی.";
+    public string ConfigFlowHealthSummary => $"{TotalProfiles:N0} کل • {WorkingProfiles:N0} سالم • {FailedProfiles:N0} ناموفق • {UntestedProfiles:N0} تست‌نشده";
     public int FilteredCount => _filteredSnapshot.Count;
     public int VisibleCount => FilteredProfiles.Count;
     public bool HasMoreProfiles => VisibleCount < FilteredCount;
@@ -265,6 +332,9 @@ public sealed class MainViewModel : ObservableObject
     public Command ResetFiltersCommand { get; }
     public Command ToggleAdvancedConfigToolsCommand { get; }
     public Command LoadMoreCommand { get; }
+    public Command RefreshDiagnosticsCommand { get; }
+    public Command CopyDiagnosticsCommand { get; }
+    public Command DiagnoseConnectionCommand { get; }
 
     private void RefreshConnectionActions()
     {
@@ -276,6 +346,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(CanStartConnection));
         OnPropertyChanged(nameof(CanStopConnection));
         OnPropertyChanged(nameof(ConnectionBadgeText));
+        OnPropertyChanged(nameof(DiagnosticsReport));
         ConnectCommand?.ChangeCanExecute();
         ConnectBestCommand?.ChangeCanExecute();
         DisconnectCommand?.ChangeCanExecute();
@@ -286,6 +357,15 @@ public sealed class MainViewModel : ObservableObject
         if (_connectionUiPhase == phase) return;
         _connectionUiPhase = phase;
         RefreshConnectionActions();
+    }
+
+    private void NotifyRecommendedProfileChanged()
+    {
+        OnPropertyChanged(nameof(HasRecommendedProfile));
+        OnPropertyChanged(nameof(NoRecommendedProfile));
+        OnPropertyChanged(nameof(RecommendedProfileName));
+        OnPropertyChanged(nameof(RecommendedProfileScoreText));
+        OnPropertyChanged(nameof(RecommendedProfileDetails));
     }
 
     public async Task InitializeAsync()
@@ -301,6 +381,12 @@ public sealed class MainViewModel : ObservableObject
                 Settings.TestConcurrency = DeviceInfo.Platform == DevicePlatform.WinUI ? 24 : DeviceInfo.Platform == DevicePlatform.Android ? 6 : 4;
             Settings.TestConcurrency = Math.Clamp(Settings.TestConcurrency, 1, DeviceInfo.Platform == DevicePlatform.WinUI ? 64 : 12);
             if (Settings.ProbePort <= 1024 || Settings.ProbePort > 65535) Settings.ProbePort = 10810;
+            Settings.AutoReconnectAttempts = Math.Clamp(Settings.AutoReconnectAttempts <= 0 ? 3 : Settings.AutoReconnectAttempts, 1, 5);
+            OnPropertyChanged(nameof(QuickMode));
+            OnPropertyChanged(nameof(AutoReconnect));
+            OnPropertyChanged(nameof(AutoReconnectAttempts));
+            OnPropertyChanged(nameof(ConfigModeText));
+            OnPropertyChanged(nameof(ConfigModeHint));
 
             _visibleLimit = InitialVisibleLimit();
             var loadedProfiles = await _store.LoadProfilesAsync();
@@ -313,6 +399,7 @@ public sealed class MainViewModel : ObservableObject
             StatusMessage = IsConnected ? $"VPN فعال • {BackendTitle}" : $"آماده • {BackendTitle}";
             if (DeviceInfo.Platform == DevicePlatform.Android)
                 ConnectionStatusMessage = IsConnected ? "VPN Android فعال است." : "آماده برای اتصال؛ اگر مجوز قبلاً داده شده باشد Android پنجره مجوز را دوباره نشان نمی‌دهد.";
+            RefreshDiagnosticsReport();
         }
         finally
         {
@@ -490,7 +577,7 @@ public sealed class MainViewModel : ObservableObject
                 {
                     profile.LatencyMs = result.LatencyMs;
                     profile.LastTested = DateTime.Now;
-                    profile.TestMessage = result.Message;
+                    profile.TestMessage = HumanizeTestResult(result);
                     profile.Health = newHealth;
                     if (!result.Success) profile.FailureCount++; else profile.FailureCount = 0;
                     ProgressDone++;
@@ -706,7 +793,7 @@ public sealed class MainViewModel : ObservableObject
                     {
                         p.LatencyMs = result.LatencyMs;
                         p.LastTested = DateTime.Now;
-                        p.TestMessage = result.Message;
+                        p.TestMessage = HumanizeTestResult(result);
                         p.Health = newHealth;
                         if (!result.Success) p.FailureCount++; else p.FailureCount = 0;
                         ProgressDone++;
@@ -797,49 +884,121 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
+        var attempts = BuildConnectionAttempts(candidate).ToList();
+        if (attempts.Count == 0) attempts.Add(candidate);
+        var maxAttempts = Settings.AutoReconnect ? Math.Clamp(Settings.AutoReconnectAttempts, 1, 5) : 1;
+        attempts = attempts.Take(maxAttempts).ToList();
+        var failures = new List<string>();
+
         IsBusy = true;
         try
         {
             IsConnected = false;
-            SetConnectionUiPhase(ConnectionUiPhase.Connecting);
-            StatusMessage = "در حال اتصال...";
-            ConnectionStatusMessage = DeviceInfo.Platform == DevicePlatform.Android
-                ? "مرحله 1: بررسی مجوز VPN Android..."
-                : "در حال اتصال...";
-            await _tunnel.EnsureReadyAsync(Settings, cancellationToken: default);
-            await _tunnel.ConnectAsync(SelectedProfile, Settings);
-            SetConnectionUiPhase(ConnectionUiPhase.Validating);
-            StatusMessage = "تونل آماده شد؛ در حال تست اینترنت...";
-            ConnectionStatusMessage = "در حال تست عبور واقعی اینترنت از تونل...";
-
-            var validation = await _tunnel.TestCurrentConnectionAsync(Settings);
-            if (!validation.Success || validation.Level != ValidationLevel.FullProxy)
+            for (var attemptIndex = 0; attemptIndex < attempts.Count; attemptIndex++)
             {
-                IsConnected = false;
-                StatusMessage = "تست اینترنت ناموفق بود؛ اتصال تأیید نشد.";
-                ConnectionStatusMessage = "تا تأیید کامل اینترنت، وضعیت متصل نمایش داده نمی‌شود: " + validation.Message;
-                try { await _tunnel.DisconnectAsync(Settings); } catch { }
-                if (Shell.Current is not null)
-                    await Shell.Current.DisplayAlert("تست اینترنت ناموفق بود", validation.Message, "باشه");
-                return;
+                var profile = attempts[attemptIndex];
+                SelectedHealthyProfile = profile;
+                SelectedProfile = profile;
+                var attemptText = attempts.Count == 1 ? "" : $" ({attemptIndex + 1}/{attempts.Count})";
+
+                try
+                {
+                    SetConnectionUiPhase(ConnectionUiPhase.Connecting);
+                    StatusMessage = $"در حال اتصال به {profile.DisplayName}{attemptText}...";
+                    ConnectionStatusMessage = DeviceInfo.Platform == DevicePlatform.Android
+                        ? $"مرحله 1: بررسی مجوز VPN Android{attemptText}..."
+                        : $"در حال ساخت تونل{attemptText}...";
+                    await _tunnel.EnsureReadyAsync(Settings, cancellationToken: default);
+                    await _tunnel.ConnectAsync(profile, Settings);
+
+                    SetConnectionUiPhase(ConnectionUiPhase.Validating);
+                    StatusMessage = $"تونل آماده شد؛ در حال تست اینترنت {profile.DisplayName}...";
+                    ConnectionStatusMessage = "در حال تست عبور واقعی اینترنت از تونل...";
+
+                    var validation = await _tunnel.TestCurrentConnectionAsync(Settings);
+                    if (validation.Success && validation.Level == ValidationLevel.FullProxy)
+                    {
+                        profile.Health = ProfileHealth.Working;
+                        profile.LatencyMs = validation.LatencyMs ?? profile.LatencyMs;
+                        profile.LastTested = DateTime.Now;
+                        profile.TestMessage = HumanizeTestResult(validation);
+                        profile.FailureCount = 0;
+                        SelectedHealthyProfile = profile;
+                        SelectedProfile = profile;
+                        IsConnected = true;
+                        StatusMessage = DeviceInfo.Platform == DevicePlatform.Android
+                            ? $"VPN Android متصل و تست اینترنت تأیید شد: {profile.DisplayName}"
+                            : $"متصل و تست اینترنت تأیید شد: {profile.DisplayName} • HTTP محلی: 127.0.0.1:{Settings.HttpPort}";
+                        ConnectionStatusMessage = DeviceInfo.Platform == DevicePlatform.Android
+                            ? $"✓ اینترنت از VPN تأیید شد • {profile.DisplayName} • {validation.Message}"
+                            : $"✓ اینترنت از Proxy تأیید شد • {validation.Message}";
+                        await _store.SaveProfilesAsync(Profiles);
+                        RefreshFilters();
+                        RefreshStats();
+                        RefreshDiagnosticsReport();
+                        if (DeviceInfo.Platform == DevicePlatform.Android && Shell.Current is not null)
+                            await Shell.Current.DisplayAlert("VPN متصل شد", $"اینترنت از SaePar Tunnel تأیید شد.\n{validation.Message}", "باشه");
+                        return;
+                    }
+
+                    var friendly = HumanizeTestResult(validation);
+                    failures.Add($"{profile.DisplayName}: {friendly}");
+                    MarkConnectionAttemptFailed(profile, friendly);
+                    try { await _tunnel.DisconnectAsync(Settings); } catch { }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    var friendly = HumanizeException(ex);
+                    failures.Add($"{profile.DisplayName}: {friendly}");
+                    MarkConnectionAttemptFailed(profile, friendly);
+                    try { await _tunnel.DisconnectAsync(Settings); } catch { }
+                }
             }
 
-            if (SelectedProfile.Health == ProfileHealth.Working) SelectedHealthyProfile = SelectedProfile;
-            IsConnected = true;
-            StatusMessage = DeviceInfo.Platform == DevicePlatform.Android
-                ? $"VPN Android متصل و تست اینترنت تأیید شد: {SelectedProfile.DisplayName}"
-                : $"متصل و تست اینترنت تأیید شد: {SelectedProfile.DisplayName} • HTTP محلی: 127.0.0.1:{Settings.HttpPort}";
-            ConnectionStatusMessage = DeviceInfo.Platform == DevicePlatform.Android
-                ? $"✓ اینترنت از VPN تأیید شد • {SelectedProfile.DisplayName} • {validation.Message}"
-                : $"✓ اینترنت از Proxy تأیید شد • {validation.Message}";
-            if (DeviceInfo.Platform == DevicePlatform.Android && Shell.Current is not null)
-                await Shell.Current.DisplayAlert("VPN متصل شد", $"اینترنت از SaePar Tunnel تأیید شد.\n{validation.Message}", "باشه");
+            IsConnected = false;
+            var summary = failures.Count == 0
+                ? "هیچ سرور سالمی برای تلاش بعدی باقی نماند."
+                : failures[0];
+            StatusMessage = "اتصال تأیید نشد؛ سرورهای جایگزین هم نتیجه ندادند.";
+            ConnectionStatusMessage = summary;
+            await _store.SaveProfilesAsync(Profiles);
+            RefreshFilters();
+            RefreshStats();
+            RefreshDiagnosticsReport();
+            if (Shell.Current is not null)
+                await Shell.Current.DisplayAlert("اتصال تأیید نشد", $"{summary}\nاز صفحه کانفیگ‌ها دوباره تست سلامت بگیر.", "باشه");
         }
         finally
         {
             SetConnectionUiPhase(ConnectionUiPhase.Idle);
             IsBusy = false;
         }
+    }
+
+    private IEnumerable<ConfigProfile> BuildConnectionAttempts(ConfigProfile first)
+    {
+        yield return first;
+
+        foreach (var profile in Profiles
+                     .Where(x => x.Health == ProfileHealth.Working && x.Id != first.Id)
+                     .OrderByDescending(x => x.QualityScore)
+                     .ThenBy(x => x.LatencyMs ?? int.MaxValue)
+                     .ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase))
+        {
+            yield return profile;
+        }
+    }
+
+    private static void MarkConnectionAttemptFailed(ConfigProfile profile, string message)
+    {
+        profile.Health = ProfileHealth.Failed;
+        profile.LastTested = DateTime.Now;
+        profile.TestMessage = message;
+        profile.FailureCount++;
     }
 
     private async Task ConnectBestAsync()
@@ -868,6 +1027,7 @@ public sealed class MainViewModel : ObservableObject
             IsConnected = false;
             StatusMessage = "اتصال قطع شد.";
             ConnectionStatusMessage = "VPN قطع است.";
+            RefreshDiagnosticsReport();
         }
         finally
         {
@@ -905,6 +1065,67 @@ public sealed class MainViewModel : ObservableObject
         return Task.CompletedTask;
     }
 
+    private void RefreshDiagnosticsReport()
+    {
+        var selected = SelectedHealthyProfile ?? SelectedProfile;
+        var builder = new StringBuilder();
+        builder.AppendLine("SaePar Tunnel Diagnostics");
+        builder.AppendLine($"Version: {ReleaseVersionText}");
+        builder.AppendLine($"Runtime: {RuntimeSummaryText}");
+        builder.AppendLine($"Backend: {BackendTitle}");
+        builder.AppendLine($"Tunnel supported: {CanTunnel}");
+        builder.AppendLine($"Connection: {ConnectionBadgeText}");
+        builder.AppendLine($"Connection message: {ConnectionStatusMessage}");
+        builder.AppendLine($"Profiles: total={TotalProfiles}, working={WorkingProfiles}, reachable={ReachableProfiles}, failed={FailedProfiles}, untested={UntestedProfiles}");
+        builder.AppendLine($"Recommended: {RecommendedProfileName} | {RecommendedProfileScoreText}");
+        builder.AppendLine($"Selected: {(selected is null ? "-" : $"{selected.DisplayName} | {selected.Endpoint} | {selected.QualitySummaryText} | {selected.HealthText}")}");
+        builder.AppendLine($"Ports: socks={Settings.SocksPort}, http={Settings.HttpPort}, probe={Settings.ProbePort}");
+        builder.AppendLine($"Quick mode: {Settings.QuickMode}");
+        builder.AppendLine($"Auto reconnect: {Settings.AutoReconnect} ({Settings.AutoReconnectAttempts})");
+        builder.AppendLine($"System proxy: {Settings.EnableSystemProxy}");
+        builder.AppendLine($"GitHub source: {Settings.GitHubSubscriptionUrl}");
+        builder.AppendLine($"Last fetch: {(Settings.LastGitHubFetchUtc is null ? "-" : Settings.LastGitHubFetchUtc.Value.ToLocalTime().ToString("yyyy/MM/dd HH:mm"))}");
+        if (IsWindows) builder.AppendLine($"Xray path: {(string.IsNullOrWhiteSpace(Settings.XrayPath) ? "auto" : Settings.XrayPath)}");
+        DiagnosticsReport = builder.ToString().TrimEnd();
+    }
+
+    private async Task CopyDiagnosticsAsync()
+    {
+        RefreshDiagnosticsReport();
+        await Clipboard.Default.SetTextAsync(DiagnosticsReport);
+        StatusMessage = "گزارش عیب‌یابی کپی شد.";
+    }
+
+    private async Task DiagnoseConnectionAsync()
+    {
+        RefreshDiagnosticsReport();
+        if (!IsConnected && !_tunnel.IsConnected)
+        {
+            StatusMessage = "اتصال فعالی برای تست زنده وجود ندارد.";
+            ConnectionStatusMessage = "VPN قطع است.";
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            StatusMessage = "در حال تست اتصال فعلی...";
+            var result = await _tunnel.TestCurrentConnectionAsync(Settings);
+            var message = HumanizeTestResult(result);
+            ConnectionStatusMessage = result.Success && result.Level == ValidationLevel.FullProxy
+                ? "اتصال فعلی سالم و تأییدشده است."
+                : message;
+            StatusMessage = ConnectionStatusMessage;
+            RefreshDiagnosticsReport();
+            if (Shell.Current is not null)
+                await Shell.Current.DisplayAlert("نتیجه عیب‌یابی", $"{message}\n{result.Message}", "باشه");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     private async Task BrowseXrayAsync()
     {
         if (!IsWindows) return;
@@ -931,11 +1152,23 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task SaveSettingsAsync()
     {
+        await PersistSettingsAsync(announce: true);
+    }
+
+    private async Task PersistSettingsAsync(bool announce = false)
+    {
         Settings.TestConcurrency = Math.Clamp(Settings.TestConcurrency, 1, DeviceInfo.Platform == DevicePlatform.WinUI ? 64 : 12);
+        Settings.AutoReconnectAttempts = Math.Clamp(Settings.AutoReconnectAttempts <= 0 ? 3 : Settings.AutoReconnectAttempts, 1, 5);
         Settings.WhitelistWebsites = WhitelistWebsites.ToList();
         Settings.WhitelistApplications = WhitelistApplications.ToList();
         await _store.SaveSettingsAsync(Settings);
-        StatusMessage = "تنظیمات ذخیره شد.";
+        OnPropertyChanged(nameof(QuickMode));
+        OnPropertyChanged(nameof(AutoReconnect));
+        OnPropertyChanged(nameof(AutoReconnectAttempts));
+        OnPropertyChanged(nameof(ConfigModeText));
+        OnPropertyChanged(nameof(ConfigModeHint));
+        RefreshDiagnosticsReport();
+        if (announce) StatusMessage = "تنظیمات ذخیره شد.";
     }
 
     private void AddWebsite()
@@ -1083,6 +1316,7 @@ public sealed class MainViewModel : ObservableObject
 
         query = SortOption switch
         {
+            "بهترین امتیاز" => query.OrderByDescending(x => x.QualityScore).ThenBy(x => x.LatencyMs ?? int.MaxValue).ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase),
             "قدیمی‌ترین اضافه‌شده" => query.OrderBy(x => x.FirstSeen).ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase),
             "کمترین Ping" => query.OrderBy(x => x.LatencyMs ?? int.MaxValue).ThenByDescending(x => x.FirstSeen),
             "بیشترین Ping" => query.OrderByDescending(x => x.LatencyMs ?? int.MinValue).ThenByDescending(x => x.FirstSeen),
@@ -1118,7 +1352,8 @@ public sealed class MainViewModel : ObservableObject
         var selectedId = SelectedHealthyProfile?.Id;
         var healthy = Profiles
             .Where(x => x.Health == ProfileHealth.Working)
-            .OrderBy(x => x.LatencyMs ?? int.MaxValue)
+            .OrderByDescending(x => x.QualityScore)
+            .ThenBy(x => x.LatencyMs ?? int.MaxValue)
             .ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
 
@@ -1130,6 +1365,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(HealthyProfilesCountText));
         OnPropertyChanged(nameof(SelectedHealthyPingText));
         OnPropertyChanged(nameof(HealthySelectionSummary));
+        NotifyRecommendedProfileChanged();
     }
 
     private void RefreshStats()
@@ -1145,11 +1381,15 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(HasMoreProfiles));
         OnPropertyChanged(nameof(VisibleProfilesLabel));
         NotifyConfigFlowChanged();
+        RefreshDiagnosticsReport();
     }
 
     private void NotifyConfigFlowChanged()
     {
         OnPropertyChanged(nameof(PrimaryConfigFlowHint));
+        OnPropertyChanged(nameof(ConfigFlowNextStep));
+        OnPropertyChanged(nameof(ConfigFlowHealthSummary));
+        NotifyRecommendedProfileChanged();
     }
 
     private async Task RunSafeAsync(Func<Task> action)
@@ -1163,7 +1403,7 @@ public sealed class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            var friendly = FlattenException(ex);
+            var friendly = HumanizeException(ex);
             StatusMessage = "خطا: " + friendly;
             if (DeviceInfo.Platform == DevicePlatform.Android) ConnectionStatusMessage = "✕ " + friendly;
             IsTesting = false;
@@ -1171,6 +1411,36 @@ public sealed class MainViewModel : ObservableObject
             if (Shell.Current is not null)
                 await Shell.Current.DisplayAlert("خطا", friendly, "باشه");
         }
+    }
+
+    private static string HumanizeTestResult(TestResult result) =>
+        result.Success
+            ? result.Level == ValidationLevel.FullProxy
+                ? "این سرور اینترنت را کامل از تونل عبور داد."
+                : "سرور پاسخ داد، اما عبور کامل اینترنت از تونل تأیید نشد."
+            : HumanizeProblem(result.Message);
+
+    private static string HumanizeException(Exception ex) => HumanizeProblem(FlattenException(ex));
+
+    private static string HumanizeProblem(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return "یک خطای نامشخص رخ داد. دوباره تلاش کن یا از Diagnostics گزارش بگیر.";
+
+        var lower = message.ToLowerInvariant();
+        if (lower.Contains("timeout") || lower.Contains("timed out") || lower.Contains("operation timed out"))
+            return "سرور دیر پاسخ داد. معمولاً با انتخاب یک سرور دیگر حل می‌شود.";
+        if (lower.Contains("connection refused") || lower.Contains("actively refused"))
+            return "سرور اتصال را رد کرد. این کانفیگ احتمالاً دیگر فعال نیست.";
+        if (lower.Contains("network is unreachable") || lower.Contains("no route") || lower.Contains("host unreachable"))
+            return "مسیر اینترنت به این سرور برقرار نشد. اینترنت دستگاه یا سرور مقصد را بررسی کن.";
+        if (lower.Contains("permission") || lower.Contains("vpn"))
+            return "مجوز یا سرویس VPN کامل فعال نشده است. تنظیمات VPN دستگاه را بررسی کن.";
+        if (lower.Contains("proxy") && lower.Contains("failed"))
+            return "تونل ساخته شد، اما عبور اینترنت از Proxy تأیید نشد. یک سرور دیگر امتحان کن.";
+        if (lower.Contains("xray") || lower.Contains("core"))
+            return "موتور Xray با این کانفیگ مشکل داشت. کانفیگ دیگری را تست کن یا Diagnostics را ببین.";
+        if (message.Length <= 180) return message;
+        return message[..180] + "...";
     }
 
     private static string FlattenException(Exception ex)
