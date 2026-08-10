@@ -53,7 +53,7 @@ bf572baa92c2c760a56fe96cbe1040e796f58989c126f7647f80022fda08922c  ./src/SaeParTu
 a13d8cbe11faa3d4d28b7a623df4192ca17c9239a737c0fdeeda443c91dce372  ./src/SaeParTunnel.App/MauiProgram.cs
 baa14b0942d23874e672aad02ddf84ce743f7d479eb98a718daa67c4b1ae1451  ./src/SaeParTunnel.App/Pages/ConfigsPage.xaml
 94123e05b1034417d364e5090902f88bbf9ed718a130bae224f0c825b2d7cbed  ./src/SaeParTunnel.App/Pages/ConfigsPage.xaml.cs
-fc32150e7e9212253916a86f370ef2780122177e6a0e0cc8bb7e8c8f304f3614  ./src/SaeParTunnel.App/Pages/DashboardPage.xaml
+c20452985ec70f65e0457c6027c23f54809edb390b9b764107d00bfe5621598c  ./src/SaeParTunnel.App/Pages/DashboardPage.xaml
 65122ef9b4d47e33cae2c3c99bfbc05ce050369c151a6493c92a8d68adeb01e8  ./src/SaeParTunnel.App/Pages/DashboardPage.xaml.cs
 505b4dc013d93d263a3311ee24d11e498928cf8c559a036361d6424d8252dcaf  ./src/SaeParTunnel.App/Pages/SettingsPage.xaml
 41e4f9fb51972259ce5badcc0d35ad63d346998bf7ba354dc5f0bd7a8da2f5e8  ./src/SaeParTunnel.App/Pages/SettingsPage.xaml.cs

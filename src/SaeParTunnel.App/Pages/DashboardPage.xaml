@@ -70,7 +70,22 @@
                                 Text="اتصال"
                                 Command="{Binding ConnectCommand}"
                                 IsEnabled="{Binding CanStartConnection}"
-                                Style="{StaticResource PrimaryButton}" />
+                                Style="{StaticResource PrimaryButton}">
+                            <Button.Triggers>
+                                <DataTrigger TargetType="Button" Binding="{Binding IsConnected}" Value="True">
+                                    <Setter Property="BackgroundColor" Value="{StaticResource Surface2}" />
+                                    <Setter Property="TextColor" Value="{StaticResource TextSecondary}" />
+                                    <Setter Property="FontAttributes" Value="None" />
+                                    <Setter Property="Opacity" Value="0.65" />
+                                </DataTrigger>
+                                <DataTrigger TargetType="Button" Binding="{Binding IsConnected}" Value="False">
+                                    <Setter Property="BackgroundColor" Value="{StaticResource Accent}" />
+                                    <Setter Property="TextColor" Value="#06221F" />
+                                    <Setter Property="FontAttributes" Value="Bold" />
+                                    <Setter Property="Opacity" Value="1" />
+                                </DataTrigger>
+                            </Button.Triggers>
+                        </Button>
                         <Button Grid.Row="0" Grid.Column="1"
                                 Text="بهترین Ping"
                                 Command="{Binding ConnectBestCommand}"
