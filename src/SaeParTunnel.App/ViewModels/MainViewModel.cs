@@ -58,7 +58,6 @@ public sealed class MainViewModel : ObservableObject
         SelectVisibleCommand = new Command(SelectVisibleForTest);
         ClearSelectionCommand = new Command(ClearTestSelection);
         TestHealthySelectionCommand = new Command(async () => await RunSafeAsync(TestHealthySelectionAsync));
-        TestRecommendedCommand = new Command(async () => await RunSafeAsync(TestRecommendedAsync));
         CancelTestCommand = new Command(CancelTest);
         ConnectCommand = new Command(async () => await RunSafeAsync(ConnectSelectedAsync));
         ConnectBestCommand = new Command(async () => await RunSafeAsync(ConnectBestAsync));
@@ -127,16 +126,6 @@ public sealed class MainViewModel : ObservableObject
         .OrderBy(x => x.LatencyMs ?? int.MaxValue)
         .ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase)
         .FirstOrDefault();
-    public bool HasRecommendedHealthyProfile => RecommendedHealthyProfile is not null;
-    public bool HasNoRecommendedHealthyProfile => !HasRecommendedHealthyProfile;
-    public string RecommendedServerTitle => RecommendedHealthyProfile?.DisplayName ?? "هنوز گزینه پیشنهادی نداریم";
-    public string RecommendedServerMeta => RecommendedHealthyProfile is null
-        ? "بدون کانفیگ Full-Test"
-        : $"{RecommendedHealthyProfile.ProtocolText} • {RecommendedHealthyProfile.Endpoint} • {RecommendedHealthyProfile.Security}";
-    public string RecommendedServerPingText => RecommendedHealthyProfile?.LatencyText ?? "-";
-    public string RecommendedServerNote => RecommendedHealthyProfile is null
-        ? "بدون پیشنهاد فعال"
-        : "سریع‌ترین Full-Test";
 
     public bool IsBusy
     {
@@ -236,7 +225,6 @@ public sealed class MainViewModel : ObservableObject
     public Command SelectVisibleCommand { get; }
     public Command ClearSelectionCommand { get; }
     public Command TestHealthySelectionCommand { get; }
-    public Command TestRecommendedCommand { get; }
     public Command CancelTestCommand { get; }
     public Command ConnectCommand { get; }
     public Command ConnectBestCommand { get; }
@@ -391,22 +379,6 @@ public sealed class MainViewModel : ObservableObject
         {
             StatusMessage = $"این کانفیگ دیگر Full-Test سالم نیست: {profile.TestMessage}";
         }
-    }
-
-    private async Task TestRecommendedAsync()
-    {
-        var profile = RecommendedHealthyProfile;
-        if (profile is null)
-        {
-            StatusMessage = "هنوز کانفیگ سالمی برای تست مجدد پیشنهادی نداریم؛ اول یافتن سالم را اجرا کن.";
-            return;
-        }
-
-        SelectedHealthyProfile = profile;
-        SelectedProfile = profile;
-        await TestProfilesAsync(new[] { profile });
-        if (profile.Health != ProfileHealth.Working)
-            SelectedHealthyProfile = HealthyProfiles.FirstOrDefault();
     }
 
     private Task TestFilteredAsync() => TestProfilesAsync(_filteredSnapshot.ToList(), guidedHealthySearch: true);
@@ -774,22 +746,38 @@ public sealed class MainViewModel : ObservableObject
         IsBusy = true;
         try
         {
+            IsConnected = false;
             StatusMessage = "در حال اتصال...";
             ConnectionStatusMessage = DeviceInfo.Platform == DevicePlatform.Android
                 ? "مرحله 1: بررسی مجوز VPN Android..."
                 : "در حال اتصال...";
             await _tunnel.EnsureReadyAsync(Settings, cancellationToken: default);
             await _tunnel.ConnectAsync(SelectedProfile, Settings);
+            StatusMessage = "تونل آماده شد؛ در حال تست اینترنت...";
+            ConnectionStatusMessage = "در حال تست عبور واقعی اینترنت از تونل...";
+
+            var validation = await _tunnel.TestCurrentConnectionAsync(Settings);
+            if (!validation.Success || validation.Level != ValidationLevel.FullProxy)
+            {
+                IsConnected = false;
+                StatusMessage = "تست اینترنت ناموفق بود؛ اتصال تأیید نشد.";
+                ConnectionStatusMessage = "تا تأیید کامل اینترنت، وضعیت متصل نمایش داده نمی‌شود: " + validation.Message;
+                try { await _tunnel.DisconnectAsync(Settings); } catch { }
+                if (Shell.Current is not null)
+                    await Shell.Current.DisplayAlert("تست اینترنت ناموفق بود", validation.Message, "باشه");
+                return;
+            }
+
             if (SelectedProfile.Health == ProfileHealth.Working) SelectedHealthyProfile = SelectedProfile;
-            IsConnected = _tunnel.IsConnected;
+            IsConnected = true;
             StatusMessage = DeviceInfo.Platform == DevicePlatform.Android
-                ? $"VPN Android متصل: {SelectedProfile.DisplayName}"
-                : $"متصل: {SelectedProfile.DisplayName} • HTTP محلی: 127.0.0.1:{Settings.HttpPort}";
+                ? $"VPN Android متصل و تست اینترنت تأیید شد: {SelectedProfile.DisplayName}"
+                : $"متصل و تست اینترنت تأیید شد: {SelectedProfile.DisplayName} • HTTP محلی: 127.0.0.1:{Settings.HttpPort}";
             ConnectionStatusMessage = DeviceInfo.Platform == DevicePlatform.Android
-                ? $"✓ متصل به {SelectedProfile.DisplayName} • {SelectedProfile.LatencyText}"
-                : StatusMessage;
+                ? $"✓ اینترنت از VPN تأیید شد • {SelectedProfile.DisplayName} • {validation.Message}"
+                : $"✓ اینترنت از Proxy تأیید شد • {validation.Message}";
             if (DeviceInfo.Platform == DevicePlatform.Android && Shell.Current is not null)
-                await Shell.Current.DisplayAlert("VPN متصل شد", $"SaePar Tunnel به {SelectedProfile.DisplayName} متصل شد.\nPing ثبت‌شده: {SelectedProfile.LatencyText}", "باشه");
+                await Shell.Current.DisplayAlert("VPN متصل شد", $"اینترنت از SaePar Tunnel تأیید شد.\n{validation.Message}", "باشه");
         }
         finally { IsBusy = false; }
     }
@@ -1081,12 +1069,6 @@ public sealed class MainViewModel : ObservableObject
     private void NotifyConfigFlowChanged()
     {
         OnPropertyChanged(nameof(PrimaryConfigFlowHint));
-        OnPropertyChanged(nameof(HasRecommendedHealthyProfile));
-        OnPropertyChanged(nameof(HasNoRecommendedHealthyProfile));
-        OnPropertyChanged(nameof(RecommendedServerTitle));
-        OnPropertyChanged(nameof(RecommendedServerMeta));
-        OnPropertyChanged(nameof(RecommendedServerPingText));
-        OnPropertyChanged(nameof(RecommendedServerNote));
     }
 
     private async Task RunSafeAsync(Func<Task> action)

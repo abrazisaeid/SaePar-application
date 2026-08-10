@@ -191,42 +191,29 @@ public sealed class SaeParVpnService : VpnService
             var response = SaeParXrayBridge.Invoke(request);
             EnsureLibXraySuccess(response, "شروع Xray");
 
-            // At this point VpnService/TUN and Xray are both running. Signal the
-            // control-plane connection immediately; do not hold the Connect button
-            // hostage to DNS/HTTP connectivity checks, because Android DNS resolution
-            // itself can take tens of seconds on filtered networks. The data-plane
-            // verification runs in the background and reports VERIFIED or WARNING.
-            AndroidVpnRuntime.SignalConnected(profileId);
-            UpdateNotification($"متصل • {profileName}");
+            AndroidVpnRuntime.ReportStatus(
+                "data-plane-check",
+                "VPN و Xray آماده‌اند؛ در حال تست عبور واقعی اینترنت از TUN...");
+            UpdateNotification($"در حال تست اینترنت • {profileName}");
 
-            _ = Task.Run(async () =>
+            var validation = await ValidateTunnelTrafficAsync().ConfigureAwait(false);
+            if (validation.Success)
             {
                 AndroidVpnRuntime.ReportStatus(
-                    "data-plane-check",
-                    "VPN فعال است؛ در حال بررسی عبور واقعی اینترنت از TUN...",
-                    true,
+                    "data-plane-ok",
+                    $"مسیر TUN → Xray → Internet تأیید شد ({validation.Message}) • fd={tunFd} • DNS={tunDns}.",
+                    null,
                     profileId);
+                AndroidVpnRuntime.SignalConnected(profileId);
+                UpdateNotification($"متصل و تست‌شده • {profileName}");
+                return;
+            }
 
-                var validation = await ValidateTunnelTrafficAsync().ConfigureAwait(false);
-                if (validation.Success)
-                {
-                    AndroidVpnRuntime.ReportStatus(
-                        "data-plane-ok",
-                        $"مسیر TUN → Xray → Internet تأیید شد ({validation.Message}) • fd={tunFd} • DNS={tunDns}.",
-                        true,
-                        profileId);
-                    UpdateNotification($"متصل و تست‌شده • {profileName}");
-                }
-                else
-                {
-                    AndroidVpnRuntime.ReportStatus(
-                        "data-plane-warning",
-                        $"VPN و Xray فعال‌اند، اما Data Plane تأیید نشد • fd={tunFd} • TUN={tunAddress}/32 • DNS={tunDns}: " + validation.Message,
-                        true,
-                        profileId);
-                    UpdateNotification($"متصل • بررسی اینترنت ناموفق • {profileName}");
-                }
-            });
+            await StopCoreAndInterfaceOnlyAsync().ConfigureAwait(false);
+            AndroidVpnRuntime.SignalError(
+                $"تست اینترنت از VPN تأیید نشد • fd={tunFd} • TUN={tunAddress}/32 • DNS={tunDns}: " + validation.Message);
+            StopForeground(StopForegroundFlags.Remove);
+            StopSelf();
         }
         catch (Exception ex)
         {

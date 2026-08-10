@@ -108,10 +108,43 @@ public sealed class WindowsTunnelService : ITunnelService
         }
     }
 
-    public Task<TestResult> TestCurrentConnectionAsync(AppSettings settings, CancellationToken cancellationToken = default)
-        => Task.FromResult(new TestResult(false, null,
-            "تست جداگانه اتصال فعلی از Preview 11 حذف شده؛ همان کانفیگ را قبل از اتصال از لیست سالم‌ها یا صفحه کانفیگ‌ها تست کن.",
-            ValidationLevel.FullProxy));
+    public async Task<TestResult> TestCurrentConnectionAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    {
+        if (!IsConnected)
+            return new TestResult(false, null, "Xray محلی فعال نیست.", ValidationLevel.None);
+
+        try
+        {
+            using var handler = new HttpClientHandler
+            {
+                Proxy = new WebProxy($"http://127.0.0.1:{settings.HttpPort}"),
+                UseProxy = true,
+                AllowAutoRedirect = false
+            };
+            using var client = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromSeconds(settings.FastTestMode ? 4 : 7)
+            };
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("SaeParTunnel/2.0");
+
+            var sw = Stopwatch.StartNew();
+            using var response = await client.GetAsync(
+                "https://cp.cloudflare.com/generate_204",
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+            sw.Stop();
+
+            if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NoContent)
+                return new TestResult(true, (int)sw.ElapsedMilliseconds, $"Internet OK • {sw.ElapsedMilliseconds:N0} ms", ValidationLevel.FullProxy);
+
+            return new TestResult(false, null, $"HTTP {(int)response.StatusCode} از تست اینترنت.", ValidationLevel.FullProxy);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            return new TestResult(false, null, "تست اینترنت: " + ex.Message, ValidationLevel.FullProxy);
+        }
+    }
 
     public async Task ConnectAsync(ConfigProfile profile, AppSettings settings, CancellationToken cancellationToken = default)
     {

@@ -120,7 +120,7 @@ public sealed class AndroidTunnelService : ITunnelService
         CancellationToken cancellationToken = default)
     {
         return Task.FromResult(IsConnected
-            ? new TestResult(true, null, "VPN Android فعال است.", ValidationLevel.FullProxy)
+            ? new TestResult(true, null, "VPN Android فعال است و تست اینترنت تأیید شده است.", ValidationLevel.FullProxy)
             : new TestResult(false, null, "VPN Android متصل نیست.", ValidationLevel.None));
     }
 
@@ -177,7 +177,7 @@ public sealed class AndroidTunnelService : ITunnelService
             : Array.Empty<string>();
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(25));
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(45));
         var wait = AndroidVpnRuntime.PrepareStartWaitAsync(timeoutCts.Token);
 
         var intent = new Intent(activity, typeof(SaeParVpnService));
@@ -202,7 +202,7 @@ public sealed class AndroidTunnelService : ITunnelService
             var stopIntent = new Intent(activity, typeof(SaeParVpnService));
             stopIntent.SetAction(SaeParVpnService.ActionDisconnect);
             activity.StartService(stopIntent);
-            throw new TimeoutException("راه‌اندازی VPN Android بیشتر از 25 ثانیه طول کشید.");
+            throw new TimeoutException("راه‌اندازی و تست اینترنت VPN Android بیشتر از 45 ثانیه طول کشید.");
         }
     }
 
