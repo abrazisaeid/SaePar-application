@@ -43,20 +43,20 @@
 
         <Grid Grid.Row="3" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="8">
             <Button Grid.Row="0" Grid.Column="0"
-                    Text="تست فیلترشده"
+                    Text="یافتن سالم"
                     Command="{Binding TestFilteredCommand}"
                     IsEnabled="{Binding IsNotBusy}"
                     Style="{StaticResource PrimaryButton}" />
             <Button Grid.Row="0" Grid.Column="1"
-                    Text="تست موارد تیک‌خورده"
+                    Text="تست تیک‌ها"
                     Command="{Binding TestSelectedCommand}"
                     IsEnabled="{Binding IsNotBusy}" />
             <Button Grid.Row="1" Grid.Column="0"
-                    Text="انتخاب موارد نمایش‌داده‌شده"
+                    Text="تیک همه"
                     Command="{Binding SelectVisibleCommand}"
                     IsEnabled="{Binding IsNotBusy}" />
             <Button Grid.Row="1" Grid.Column="1"
-                    Text="پاک کردن انتخاب"
+                    Text="پاک تیک‌ها"
                     Command="{Binding ClearSelectionCommand}"
                     IsEnabled="{Binding IsNotBusy}" />
             <Button Grid.Row="2" Grid.ColumnSpan="2"
@@ -72,6 +72,8 @@
                     <Label Grid.Column="1" Text="{Binding ProgressLabel}" Style="{StaticResource SubtleLabel}" />
                 </Grid>
                 <ProgressBar Progress="{Binding ProgressFraction}" ProgressColor="{StaticResource Accent}" />
+                <Label Text="{Binding TestGoalMessage}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                <Label Text="{Binding ProgressHealthyLabel}" TextColor="{StaticResource Success}" FontAttributes="Bold" />
                 <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
                     <Label Grid.Column="0" Text="{Binding ProgressSpeed}" Style="{StaticResource SubtleLabel}" />
                     <Label Grid.Column="1" Text="{Binding ProgressEta}" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="End" />

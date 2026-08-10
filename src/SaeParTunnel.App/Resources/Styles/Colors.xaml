@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
-    <Color x:Key="Surface0">#08111F</Color>
-    <Color x:Key="Surface1">#0E1A2B</Color>
-    <Color x:Key="Surface2">#152338</Color>
-    <Color x:Key="Border">#263952</Color>
+    <Color x:Key="Surface0">#0F1115</Color>
+    <Color x:Key="Surface1">#171A20</Color>
+    <Color x:Key="Surface2">#232833</Color>
+    <Color x:Key="Border">#343B47</Color>
     <Color x:Key="Accent">#2DD4BF</Color>
     <Color x:Key="Accent2">#38BDF8</Color>
     <Color x:Key="TextPrimary">#F8FAFC</Color>
-    <Color x:Key="TextSecondary">#B8C4D4</Color>
+    <Color x:Key="TextSecondary">#BAC2CC</Color>
     <Color x:Key="Success">#4ADE80</Color>
     <Color x:Key="Danger">#FB7185</Color>
     <Color x:Key="Warning">#FBBF24</Color>

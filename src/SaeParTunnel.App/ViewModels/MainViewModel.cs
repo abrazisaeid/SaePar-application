@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Controls;
@@ -36,12 +37,12 @@ public sealed class MainViewModel : ObservableObject
     private string _protocolFilter = "همه";
     private string _sortOption = "جدیدترین اضافه‌شده";
     private CancellationTokenSource? _testCts;
-    private int _progressDone, _progressTotal, _progressWorking, _progressFailed;
+    private int _progressDone, _progressTotal, _progressWorking, _progressFailed, _progressFullWorking;
     private List<ConfigProfile> _filteredSnapshot = new();
     private int _visibleLimit;
     private long _lastProgressUiTicks;
     private double _progressPercent;
-    private string _progressSpeed = "-", _progressEta = "-";
+    private string _progressSpeed = "-", _progressEta = "-", _testGoalMessage = "";
     private string _newWebsite = "", _newApplication = "";
     private string _connectionStatusMessage = "اتصال فعال نیست.";
 
@@ -175,11 +176,22 @@ public sealed class MainViewModel : ObservableObject
     public int ProgressTotal { get => _progressTotal; private set => SetProperty(ref _progressTotal, value); }
     public int ProgressWorking { get => _progressWorking; private set => SetProperty(ref _progressWorking, value); }
     public int ProgressFailed { get => _progressFailed; private set => SetProperty(ref _progressFailed, value); }
+    public int ProgressFullWorking
+    {
+        get => _progressFullWorking;
+        private set
+        {
+            if (!SetProperty(ref _progressFullWorking, value)) return;
+            OnPropertyChanged(nameof(ProgressHealthyLabel));
+        }
+    }
     public double ProgressPercent { get => _progressPercent; private set => SetProperty(ref _progressPercent, value); }
     public string ProgressLabel => $"{ProgressDone:N0} / {ProgressTotal:N0} — {ProgressPercent:0}%";
     public double ProgressFraction => Math.Clamp(ProgressPercent / 100d, 0d, 1d);
     public string ProgressSpeed { get => _progressSpeed; private set => SetProperty(ref _progressSpeed, value); }
     public string ProgressEta { get => _progressEta; private set => SetProperty(ref _progressEta, value); }
+    public string ProgressHealthyLabel => $"{ProgressFullWorking:N0} سالم کامل";
+    public string TestGoalMessage { get => _testGoalMessage; private set => SetProperty(ref _testGoalMessage, value); }
 
     public string NewWebsite { get => _newWebsite; set => SetProperty(ref _newWebsite, value); }
     public string NewApplication { get => _newApplication; set => SetProperty(ref _newApplication, value); }
@@ -304,7 +316,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         StatusMessage = $"{selected.Count:N0} کانفیگ انتخابی در صف تست...";
-        await TestProfilesAsync(selected);
+        await TestProfilesAsync(selected, guidedHealthySearch: selected.Count > 5);
     }
 
     private void SelectVisibleForTest()
@@ -344,9 +356,242 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private Task TestFilteredAsync() => TestProfilesAsync(_filteredSnapshot.ToList());
+    private Task TestFilteredAsync() => TestProfilesAsync(_filteredSnapshot.ToList(), guidedHealthySearch: true);
 
-    private async Task TestProfilesAsync(IReadOnlyList<ConfigProfile> candidates)
+    private async Task TestProfilesAsync(IReadOnlyList<ConfigProfile> candidates, bool guidedHealthySearch = false)
+    {
+        if (!guidedHealthySearch || candidates.Count <= 5)
+        {
+            TestGoalMessage = "تست این لیست تا پایان اجرا می‌شود.";
+            ProgressFullWorking = 0;
+            await TestProfilesLegacyAsync(candidates);
+            return;
+        }
+
+        if (candidates.Count == 0) { StatusMessage = "کانفیگی برای تست وجود ندارد."; return; }
+#if ANDROID
+        // libXray keeps several networking managers process-wide. Avoid starting a
+        // temporary test core on top of the active Android VPN core.
+        if (_tunnel.IsConnected)
+        {
+            StatusMessage = "برای تست کانفیگ‌ها در Android ابتدا VPN را قطع کن؛ اتصال فعال دست‌نخورده باقی ماند.";
+            if (Shell.Current is not null)
+                await Shell.Current.DisplayAlert("VPN فعال است", StatusMessage, "باشه");
+            return;
+        }
+#endif
+        _testCts?.Cancel(); _testCts?.Dispose(); _testCts = new CancellationTokenSource(); var ct = _testCts.Token;
+        IsBusy = true; IsTesting = true; ProgressTotal = candidates.Count; ProgressDone = 0; ProgressWorking = 0; ProgressFailed = 0; ProgressFullWorking = 0;
+        TestGoalMessage = "هدف فعلی: پیدا کردن ۵ کانفیگ سالم؛ بعد از آن از شما می‌پرسم ادامه بدهم یا نه.";
+        var sw = Stopwatch.StartNew();
+        UpdateProgress(sw, 0);
+        var tested = 0; var concurrency = Math.Min(Settings.TestConcurrency, candidates.Count);
+        var index = 0; int? healthyTarget = 5; var stoppedAfterEnough = false;
+        StatusMessage = $"در حال پیدا کردن ۵ کانفیگ سالم از بین {candidates.Count:N0} مورد...";
+
+        async Task TestSkippedAsync()
+        {
+            var skipped = Interlocked.Increment(ref tested);
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                ProgressDone++;
+                MaybeUpdateProgress(sw, skipped, false);
+            });
+        }
+
+        async Task TestOneAsync(ConfigProfile profile)
+        {
+            if (profile.Health == ProfileHealth.Unsupported)
+            {
+                await TestSkippedAsync();
+                return;
+            }
+
+            var old = profile.Health;
+            await MainThread.InvokeOnMainThreadAsync(() => profile.Health = ProfileHealth.Testing);
+            try
+            {
+                var result = await _tunnel.TestAsync(profile, Settings, ct).ConfigureAwait(false);
+                var newHealth = result.Success ? (result.Level == ValidationLevel.FullProxy ? ProfileHealth.Working : ProfileHealth.Reachable) : ProfileHealth.Failed;
+                var done = Interlocked.Increment(ref tested);
+                await MainThread.InvokeOnMainThreadAsync(() =>
+                {
+                    profile.LatencyMs = result.LatencyMs;
+                    profile.LastTested = DateTime.Now;
+                    profile.TestMessage = result.Message;
+                    profile.Health = newHealth;
+                    if (!result.Success) profile.FailureCount++; else profile.FailureCount = 0;
+                    ProgressDone++;
+                    if (newHealth is ProfileHealth.Working or ProfileHealth.Reachable) ProgressWorking++;
+                    if (newHealth == ProfileHealth.Working) ProgressFullWorking++;
+                    else if (newHealth == ProfileHealth.Failed) ProgressFailed++;
+                    MaybeUpdateProgress(sw, done, done == ProgressTotal);
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                await MainThread.InvokeOnMainThreadAsync(() => profile.Health = old);
+            }
+        }
+
+        try
+        {
+            while (!ct.IsCancellationRequested && index < candidates.Count)
+            {
+                var batchLimit = healthyTarget is int target
+                    ? Math.Max(1, Math.Min(concurrency, target - ProgressFullWorking))
+                    : concurrency;
+                var batch = new List<ConfigProfile>(batchLimit);
+
+                while (batch.Count < batchLimit && index < candidates.Count)
+                {
+                    var profile = candidates[index++];
+                    if (profile.Health == ProfileHealth.Unsupported)
+                    {
+                        await TestSkippedAsync();
+                        continue;
+                    }
+
+                    batch.Add(profile);
+                }
+
+                if (batch.Count == 0) continue;
+
+                StatusMessage = healthyTarget is int activeTarget
+                    ? $"در حال پیدا کردن {activeTarget:N0} کانفیگ سالم؛ {ProgressFullWorking:N0} سالم تا اینجا..."
+                    : $"در حال تست همه موارد باقی‌مانده؛ {ProgressFullWorking:N0} سالم تا اینجا...";
+                await Task.WhenAll(batch.Select(TestOneAsync));
+
+                if (healthyTarget is null || ProgressFullWorking < healthyTarget.Value) continue;
+
+                if (index >= candidates.Count)
+                    continue;
+
+                if (healthyTarget.Value == 5)
+                {
+                    if (!await AskContinueAfterHealthyMilestoneAsync(5))
+                    {
+                        stoppedAfterEnough = true;
+                        break;
+                    }
+
+                    healthyTarget = 10;
+                    TestGoalMessage = "هدف فعلی: پیدا کردن ۱۰ کانفیگ سالم؛ بعد دوباره از شما می‌پرسم.";
+                    continue;
+                }
+
+                if (healthyTarget.Value == 10)
+                {
+                    if (!await AskContinueAfterHealthyMilestoneAsync(10))
+                    {
+                        stoppedAfterEnough = true;
+                        break;
+                    }
+
+                    var plan = await AskHealthySearchPlanAfterTenAsync(ProgressFullWorking, ProgressTotal - ProgressDone);
+                    if (plan.Stop)
+                    {
+                        stoppedAfterEnough = true;
+                        break;
+                    }
+
+                    healthyTarget = plan.TestAll ? null : plan.Target;
+                    TestGoalMessage = plan.TestAll
+                        ? "هدف فعلی: تست همه کانفیگ‌های باقی‌مانده."
+                        : $"هدف فعلی: پیدا کردن {healthyTarget:N0} کانفیگ سالم.";
+                    continue;
+                }
+
+                await ShowReachedHealthyTargetAsync(healthyTarget.Value);
+                stoppedAfterEnough = true;
+                break;
+            }
+        }
+        finally
+        {
+            MaybeUpdateProgress(sw, tested, true);
+            await _store.SaveProfilesAsync(Profiles);
+            RefreshFilters(); RefreshStats();
+            IsTesting = false; IsBusy = false;
+            StatusMessage = ct.IsCancellationRequested
+                ? $"تست متوقف شد؛ {ProgressDone}/{ProgressTotal} بررسی شد."
+                : stoppedAfterEnough
+                    ? $"تست با انتخاب شما متوقف شد؛ {ProgressFullWorking:N0} کانفیگ سالم پیدا شد و {ProgressDone:N0}/{ProgressTotal:N0} مورد بررسی شد."
+                    : $"تست تمام شد؛ {ProgressFullWorking:N0} سالم کامل، {ProgressWorking:N0} موفق/قابل‌دسترس و {ProgressFailed:N0} ناموفق.";
+        }
+    }
+
+    private async Task<bool> AskContinueAfterHealthyMilestoneAsync(int count)
+    {
+        if (Shell.Current is null) return true;
+
+        return await MainThread.InvokeOnMainThreadAsync(() =>
+            Shell.Current.DisplayAlert(
+                $"{count:N0} کانفیگ سالم پیدا شد",
+                $"تا اینجا {count:N0} کانفیگ Full-Test سالم داریم. همین تعداد کافی است یا ادامه بدهم؟",
+                "ادامه بده",
+                "کافیه"));
+    }
+
+    private async Task<(bool Stop, bool TestAll, int? Target)> AskHealthySearchPlanAfterTenAsync(int currentHealthy, int remaining)
+    {
+        if (Shell.Current is null) return (false, true, null);
+
+        var exactCountText = "تعداد مشخص";
+        var testAllText = "همه را تست کن";
+        var choice = await MainThread.InvokeOnMainThreadAsync(() =>
+            Shell.Current.DisplayActionSheet(
+                "ادامه تست",
+                "کافیه",
+                null,
+                exactCountText,
+                testAllText));
+
+        if (choice == testAllText) return (false, true, null);
+        if (choice != exactCountText) return (true, false, null);
+
+        var maxTarget = Math.Max(currentHealthy + 1, currentHealthy + remaining);
+        var suggested = Math.Min(currentHealthy + 10, maxTarget);
+        while (true)
+        {
+            var answer = await MainThread.InvokeOnMainThreadAsync(() =>
+                Shell.Current.DisplayPromptAsync(
+                    "چندتا سالم پیدا کنم؟",
+                    $"الان {currentHealthy:N0} سالم داریم. عدد هدف را وارد کن یا «کافیه» را بزن.",
+                    "ادامه",
+                    "کافیه",
+                    "مثلا 20",
+                    6,
+                    Keyboard.Numeric,
+                    suggested.ToString(CultureInfo.CurrentCulture)));
+
+            if (string.IsNullOrWhiteSpace(answer)) return (true, false, null);
+            if (int.TryParse(answer.Trim(), NumberStyles.Integer, CultureInfo.CurrentCulture, out var target) ||
+                int.TryParse(answer.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out target))
+            {
+                if (target > currentHealthy)
+                    return (false, false, Math.Min(target, maxTarget));
+            }
+
+            await MainThread.InvokeOnMainThreadAsync(() =>
+                Shell.Current.DisplayAlert(
+                    "عدد درست نیست",
+                    $"یک عدد بزرگ‌تر از {currentHealthy:N0} وارد کن.",
+                    "باشه"));
+        }
+    }
+
+    private async Task ShowReachedHealthyTargetAsync(int target)
+    {
+        if (Shell.Current is null) return;
+        await MainThread.InvokeOnMainThreadAsync(() =>
+            Shell.Current.DisplayAlert(
+                "به هدف رسیدم",
+                $"{target:N0} کانفیگ Full-Test سالم پیدا شد.",
+                "باشه"));
+    }
+
+    private async Task TestProfilesLegacyAsync(IReadOnlyList<ConfigProfile> candidates)
     {
         if (candidates.Count == 0) { StatusMessage = "کانفیگی برای تست وجود ندارد."; return; }
 #if ANDROID
@@ -361,7 +606,7 @@ public sealed class MainViewModel : ObservableObject
         }
 #endif
         _testCts?.Cancel(); _testCts?.Dispose(); _testCts = new CancellationTokenSource(); var ct = _testCts.Token;
-        IsBusy = true; IsTesting = true; ProgressTotal = candidates.Count; ProgressDone = 0; ProgressWorking = 0; ProgressFailed = 0;
+        IsBusy = true; IsTesting = true; ProgressTotal = candidates.Count; ProgressDone = 0; ProgressWorking = 0; ProgressFailed = 0; ProgressFullWorking = 0;
         var sw = Stopwatch.StartNew();
         UpdateProgress(sw, 0);
         var next = -1; var tested = 0; var concurrency = Math.Min(Settings.TestConcurrency, candidates.Count);
@@ -394,6 +639,7 @@ public sealed class MainViewModel : ObservableObject
                         if (!result.Success) p.FailureCount++; else p.FailureCount = 0;
                         ProgressDone++;
                         if (newHealth is ProfileHealth.Working or ProfileHealth.Reachable) ProgressWorking++;
+                        if (newHealth == ProfileHealth.Working) ProgressFullWorking++;
                         else if (newHealth == ProfileHealth.Failed) ProgressFailed++;
                         MaybeUpdateProgress(sw, done, done == ProgressTotal);
                     });
@@ -418,7 +664,7 @@ public sealed class MainViewModel : ObservableObject
             IsTesting = false; IsBusy = false;
             StatusMessage = ct.IsCancellationRequested
                 ? $"تست متوقف شد؛ {ProgressDone}/{ProgressTotal} بررسی شد."
-                : $"تست تمام شد؛ {ProgressWorking} موفق/قابل‌دسترس و {ProgressFailed} ناموفق.";
+                : $"تست تمام شد؛ {ProgressFullWorking:N0} سالم کامل، {ProgressWorking:N0} موفق/قابل‌دسترس و {ProgressFailed:N0} ناموفق.";
         }
     }
 

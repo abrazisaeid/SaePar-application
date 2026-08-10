@@ -104,6 +104,8 @@
                 <VerticalStackLayout Spacing="8">
                     <Label Text="در حال تست..." FontAttributes="Bold" />
                     <ProgressBar Progress="{Binding ProgressFraction}" ProgressColor="{StaticResource Accent}" />
+                    <Label Text="{Binding TestGoalMessage}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                    <Label Text="{Binding ProgressHealthyLabel}" TextColor="{StaticResource Success}" FontAttributes="Bold" />
                     <Label Text="{Binding ProgressLabel}" />
                     <Grid ColumnDefinitions="*,*">
                         <Label Grid.Column="0" Text="{Binding ProgressSpeed}" Style="{StaticResource SubtleLabel}" />
