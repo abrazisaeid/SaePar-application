@@ -59,9 +59,9 @@ public sealed class MainViewModel : ObservableObject
         ClearSelectionCommand = new Command(ClearTestSelection);
         TestHealthySelectionCommand = new Command(async () => await RunSafeAsync(TestHealthySelectionAsync));
         CancelTestCommand = new Command(CancelTest);
-        ConnectCommand = new Command(async () => await RunSafeAsync(ConnectSelectedAsync));
-        ConnectBestCommand = new Command(async () => await RunSafeAsync(ConnectBestAsync));
-        DisconnectCommand = new Command(async () => await RunSafeAsync(DisconnectAsync));
+        ConnectCommand = new Command(async () => await RunSafeAsync(ConnectSelectedAsync), () => CanStartConnection);
+        ConnectBestCommand = new Command(async () => await RunSafeAsync(ConnectBestAsync), () => CanStartConnection);
+        DisconnectCommand = new Command(async () => await RunSafeAsync(DisconnectAsync), () => CanStopConnection);
         SaveSettingsCommand = new Command(async () => await RunSafeAsync(SaveSettingsAsync));
         BrowseXrayCommand = new Command(async () => await RunSafeAsync(BrowseXrayAsync));
         AddWebsiteCommand = new Command(AddWebsite);
@@ -134,9 +134,12 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!SetProperty(ref _isBusy, value)) return;
             OnPropertyChanged(nameof(IsNotBusy));
+            RefreshConnectionActions();
         }
     }
     public bool IsNotBusy => !IsBusy;
+    public bool CanStartConnection => IsNotBusy && !IsConnected;
+    public bool CanStopConnection => IsNotBusy && IsConnected;
     public bool IsTesting { get => _isTesting; private set => SetProperty(ref _isTesting, value); }
     public bool IsConnected
     {
@@ -144,6 +147,7 @@ public sealed class MainViewModel : ObservableObject
         private set
         {
             if (!SetProperty(ref _isConnected, value)) return;
+            RefreshConnectionActions();
         }
     }
     public bool ShowAdvancedConfigTools
@@ -240,6 +244,15 @@ public sealed class MainViewModel : ObservableObject
     public Command ResetFiltersCommand { get; }
     public Command ToggleAdvancedConfigToolsCommand { get; }
     public Command LoadMoreCommand { get; }
+
+    private void RefreshConnectionActions()
+    {
+        OnPropertyChanged(nameof(CanStartConnection));
+        OnPropertyChanged(nameof(CanStopConnection));
+        ConnectCommand?.ChangeCanExecute();
+        ConnectBestCommand?.ChangeCanExecute();
+        DisconnectCommand?.ChangeCanExecute();
+    }
 
     public async Task InitializeAsync()
     {
@@ -725,6 +738,13 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task ConnectSelectedAsync()
     {
+        if (IsConnected)
+        {
+            StatusMessage = "اتصال فعال است؛ برای تغییر سرور ابتدا اتصال را قطع کن.";
+            ConnectionStatusMessage = "اتصال تأییدشده فعال است. برای اتصال دوباره، اول قطع اتصال را بزن.";
+            return;
+        }
+
         var candidate = SelectedHealthyProfile
             ?? (SelectedProfile?.Health == ProfileHealth.Working ? SelectedProfile : null)
             ?? HealthyProfiles.FirstOrDefault();
@@ -793,6 +813,13 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task DisconnectAsync()
     {
+        if (!IsConnected && !_tunnel.IsConnected)
+        {
+            StatusMessage = "اتصال فعالی برای قطع کردن وجود ندارد.";
+            ConnectionStatusMessage = "VPN قطع است.";
+            return;
+        }
+
         await _tunnel.DisconnectAsync(Settings);
         IsConnected = false;
         StatusMessage = "اتصال قطع شد.";
