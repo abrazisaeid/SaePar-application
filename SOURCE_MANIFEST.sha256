@@ -1,5 +1,6 @@
 df79b3634b9ef347e5878d384b562469cee1cdf132fe3f853fcf5deb125b170c  ./.github/workflows/ci.yml
-24f9731b3c5e5bba26f069df57f11d761c550d3e8680e2199179e85aeb5c93d2  ./.gitignore
+cb24e4ee781347f0769e34778290deb28293f4a7a363afd2b87bee9af027cd1d  ./.github/workflows/release.yml
+ce51001d0601e9cd444c31991ea8c65fa5dd145fda470e478db8c4e620869053  ./.gitignore
 2b52626943f12da181f0c0641de9e4cb01dd0c949ce9c2c59d943b67fff64d6d  ./ANDROID-VPN-PREVIEW13.md
 6edf8a4bcf47d95f61b69ec6bc6285e0c0a5bfdcfdfd13077db1230a9903485b  ./Directory.Build.props
 c9118a65f604fd15f3026513443edde091904ba67e3ae9121d36f641b180a1a0  ./FIX-PREVIEW10-HOME-HEALTHY-PICKER.md
@@ -27,6 +28,7 @@ ace7251dd43490ebfcf371058b493f45b9a600425053243825df9b54ba8521bb  ./START-HERE.t
 a6aacc17bffbd558a173388fca68065ecdf07ebf5dd05a333c64c236ab2cd03c  ./THIRD-PARTY-NOTICES.md
 6921cf9ee172ba0812ba2254f1afec7a7e3c34172656b81dfe63a51c009e0ece  ./VALIDATION.md
 110c83b6f2cb304da18fed3776bd03c9fe6d88ec2a09f4dac7145e0da6fd1dca  ./docs/ARCHITECTURE.md
+31058893890c3b6155cf8618d24dc766adfd8ade5be931aece1e39b3ffe1b51a  ./docs/RELEASE.md
 2693f0081d22422714daa1d306742a5654d9d856ad0a84151b179adac6b789b0  ./global.json
 dbca1000edbfad93f598389e34c102c7e1b107d9b4182c9c16b3aaf5f08b2ce9  ./native/android/README.md
 f49469de4e28216e0446a80bafbcdf017eb74ff775ab7964e69021e2ca2f8600  ./native/android/VpnService.template.cs.txt
@@ -38,6 +40,7 @@ eaad6dfc2467b2301976b5e55db69e47f92936b8732865380c78a5babd7bbe70  ./native/ios/b
 220edff5f4c9c54a4a304c9f316db58cc64df1a2c22de96301b15afdc8db90d0  ./scripts/build-ios.sh
 057ed68db6470006eec43919c774cdc0ac461110a2d9153dced2d8e9cd9879cd  ./scripts/build-windows.ps1
 51ef3756f1acbbc67d84345b8c74094526dcedcf585f757577dbd56d3d6bd54f  ./scripts/clean-build.ps1
+d7a917fdf26f09f957033c37626d38feaa840d5d09cf6204cb884b5c40d457e3  ./scripts/package-release.ps1
 c5b4468f130af791227101c0cb72e9141ac3d81ec3ceb8403fa54e480eba90fc  ./scripts/setup-windows.ps1
 33bf70459c6545477c1851380b22ca79b71df7bd494315eb124c125a71209f0a  ./src/SaeParTunnel.AndroidBinding/Libraries/SaeParXrayBridge.aar
 4708a361a74f7e955635dbe3661cefb459bdc867423c3b1826a2c5a6ea4ac77d  ./src/SaeParTunnel.AndroidBinding/Libraries/libXray.aar
@@ -75,7 +78,7 @@ d562288c1cb2937511cb7b394f77aba66b4a3789044351b62d8beaa8ea2c4786  ./src/SaeParTu
 d562288c1cb2937511cb7b394f77aba66b4a3789044351b62d8beaa8ea2c4786  ./src/SaeParTunnel.App/Resources/Splash/splash.svg
 1fca01af9ed18ec581fe62c326fdeae88661c303dac240d26cb078264425f657  ./src/SaeParTunnel.App/Resources/Styles/Colors.xaml
 c1d4f46e72b59159f585808dc289163fc98a60ce80f53849dd103d2fd52efaf4  ./src/SaeParTunnel.App/Resources/Styles/Styles.xaml
-1b63b3dc0c3adb2deb7f298beb3eb356c99097b6401c1864f102f6225082ea32  ./src/SaeParTunnel.App/SaeParTunnel.App.csproj
+7e84eb3f7ed080cfa6fe002663cd7aa9484a10f179aaae8dab7db330a2e6dcb8  ./src/SaeParTunnel.App/SaeParTunnel.App.csproj
 85ca58e4d8557177550bb6c9aeeaff86770f802d5c9a0779af7b389171ec6e6a  ./src/SaeParTunnel.App/Services/MauiJsonStore.cs
 815b18bb01d748d470640eb76280a0e845f66f8b22573be7c3d359381115fb5c  ./src/SaeParTunnel.App/Services/ObservableObject.cs
 ed2db62fcc4e85f09b59a5db5d5c20d1cd17ccbf84d810d6a3891f5f5ff53c66  ./src/SaeParTunnel.App/Services/ObservableRangeCollection.cs

@@ -12,8 +12,8 @@
     <ApplicationId>com.saepar.tunnel</ApplicationId>
     <ApplicationDisplayVersion>2.0.19</ApplicationDisplayVersion>
     <ApplicationVersion>39</ApplicationVersion>
-    <Version>2.0.16</Version>
-    <PackageVersion>2.0.16</PackageVersion>
+    <Version>2.0.19</Version>
+    <PackageVersion>2.0.19</PackageVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
@@ -29,6 +29,9 @@
          Visual Studio MAUI Project launch profile and avoids MSIX deployment
          requirements. Packaging can be re-enabled for release builds later. -->
     <WindowsPackageType>None</WindowsPackageType>
+  </PropertyGroup>
+  <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows' and '$(RuntimeIdentifierOverride)' != ''">
+    <RuntimeIdentifier>$(RuntimeIdentifierOverride)</RuntimeIdentifier>
   </PropertyGroup>
 
   <ItemGroup>
