@@ -19,6 +19,14 @@ namespace SaeParTunnel.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {
+    private enum ConnectionUiPhase
+    {
+        Idle,
+        Connecting,
+        Validating,
+        Disconnecting
+    }
+
     private const string GitHubSource = "GitHub: Epodonios/v2ray-configs";
     private readonly MauiJsonStore _store;
     private readonly ConfigExtractor _extractor;
@@ -31,6 +39,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _initialized;
     private bool _isTesting;
     private bool _isConnected;
+    private ConnectionUiPhase _connectionUiPhase;
     private bool _showAdvancedConfigTools;
     private string _statusMessage = "در حال آماده‌سازی...";
     private string _searchText = "";
@@ -138,8 +147,20 @@ public sealed class MainViewModel : ObservableObject
         }
     }
     public bool IsNotBusy => !IsBusy;
-    public bool CanStartConnection => IsNotBusy && !IsConnected;
-    public bool CanStopConnection => IsNotBusy && IsConnected;
+    public bool IsConnectionBusy => _connectionUiPhase != ConnectionUiPhase.Idle;
+    public bool IsDisconnected => !IsConnected && !IsConnectionBusy;
+    public bool ShowConnectAction => !IsConnected;
+    public bool ShowDisconnectAction => IsConnected;
+    public bool ShowConnectionTools => !IsConnected && !IsConnectionBusy;
+    public bool CanStartConnection => IsNotBusy && !IsConnected && !IsConnectionBusy;
+    public bool CanStopConnection => IsNotBusy && IsConnected && !IsConnectionBusy;
+    public string ConnectionBadgeText => _connectionUiPhase switch
+        {
+            ConnectionUiPhase.Connecting => "در حال اتصال",
+            ConnectionUiPhase.Validating => "در حال تست اینترنت",
+            ConnectionUiPhase.Disconnecting => "در حال قطع اتصال",
+            _ => IsConnected ? "متصل و تأییدشده" : "قطع"
+        };
     public bool IsTesting { get => _isTesting; private set => SetProperty(ref _isTesting, value); }
     public bool IsConnected
     {
@@ -247,11 +268,24 @@ public sealed class MainViewModel : ObservableObject
 
     private void RefreshConnectionActions()
     {
+        OnPropertyChanged(nameof(IsConnectionBusy));
+        OnPropertyChanged(nameof(IsDisconnected));
+        OnPropertyChanged(nameof(ShowConnectAction));
+        OnPropertyChanged(nameof(ShowDisconnectAction));
+        OnPropertyChanged(nameof(ShowConnectionTools));
         OnPropertyChanged(nameof(CanStartConnection));
         OnPropertyChanged(nameof(CanStopConnection));
+        OnPropertyChanged(nameof(ConnectionBadgeText));
         ConnectCommand?.ChangeCanExecute();
         ConnectBestCommand?.ChangeCanExecute();
         DisconnectCommand?.ChangeCanExecute();
+    }
+
+    private void SetConnectionUiPhase(ConnectionUiPhase phase)
+    {
+        if (_connectionUiPhase == phase) return;
+        _connectionUiPhase = phase;
+        RefreshConnectionActions();
     }
 
     public async Task InitializeAsync()
@@ -767,12 +801,14 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             IsConnected = false;
+            SetConnectionUiPhase(ConnectionUiPhase.Connecting);
             StatusMessage = "در حال اتصال...";
             ConnectionStatusMessage = DeviceInfo.Platform == DevicePlatform.Android
                 ? "مرحله 1: بررسی مجوز VPN Android..."
                 : "در حال اتصال...";
             await _tunnel.EnsureReadyAsync(Settings, cancellationToken: default);
             await _tunnel.ConnectAsync(SelectedProfile, Settings);
+            SetConnectionUiPhase(ConnectionUiPhase.Validating);
             StatusMessage = "تونل آماده شد؛ در حال تست اینترنت...";
             ConnectionStatusMessage = "در حال تست عبور واقعی اینترنت از تونل...";
 
@@ -799,7 +835,11 @@ public sealed class MainViewModel : ObservableObject
             if (DeviceInfo.Platform == DevicePlatform.Android && Shell.Current is not null)
                 await Shell.Current.DisplayAlert("VPN متصل شد", $"اینترنت از SaePar Tunnel تأیید شد.\n{validation.Message}", "باشه");
         }
-        finally { IsBusy = false; }
+        finally
+        {
+            SetConnectionUiPhase(ConnectionUiPhase.Idle);
+            IsBusy = false;
+        }
     }
 
     private async Task ConnectBestAsync()
@@ -820,10 +860,20 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        await _tunnel.DisconnectAsync(Settings);
-        IsConnected = false;
-        StatusMessage = "اتصال قطع شد.";
-        ConnectionStatusMessage = "VPN قطع است.";
+        IsBusy = true;
+        SetConnectionUiPhase(ConnectionUiPhase.Disconnecting);
+        try
+        {
+            await _tunnel.DisconnectAsync(Settings);
+            IsConnected = false;
+            StatusMessage = "اتصال قطع شد.";
+            ConnectionStatusMessage = "VPN قطع است.";
+        }
+        finally
+        {
+            SetConnectionUiPhase(ConnectionUiPhase.Idle);
+            IsBusy = false;
+        }
     }
 
 #if ANDROID
@@ -833,7 +883,11 @@ public sealed class MainViewModel : ObservableObject
         {
             ConnectionStatusMessage = e.Message;
             StatusMessage = e.Message;
-            if (e.Connected.HasValue) IsConnected = e.Connected.Value;
+            if (e.Connected.HasValue)
+            {
+                IsConnected = e.Connected.Value;
+                SetConnectionUiPhase(ConnectionUiPhase.Idle);
+            }
         });
     }
 #endif
