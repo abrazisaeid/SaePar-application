@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SaeParTunnel.App", "src\Sae
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SaeParTunnel.AndroidBinding", "src\SaeParTunnel.AndroidBinding\SaeParTunnel.AndroidBinding.csproj", "{A2D0F534-0B35-4A8F-8D94-7AE2AF4D5C17}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SaeParTunnel.Core.Tests", "tests\SaeParTunnel.Core.Tests\SaeParTunnel.Core.Tests.csproj", "{80A8CB6C-4120-4738-8F40-F47C15CA23F9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,5 +28,9 @@ Global
 		{E5BF1F1C-3DB4-44E6-A52E-BC0BAAD9AFC8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E5BF1F1C-3DB4-44E6-A52E-BC0BAAD9AFC8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E5BF1F1C-3DB4-44E6-A52E-BC0BAAD9AFC8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{80A8CB6C-4120-4738-8F40-F47C15CA23F9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{80A8CB6C-4120-4738-8F40-F47C15CA23F9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{80A8CB6C-4120-4738-8F40-F47C15CA23F9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{80A8CB6C-4120-4738-8F40-F47C15CA23F9}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -22,7 +22,7 @@ fdf3eefa69da69ced6f2908f5cdb51511f2fb00ca49b8a4a6bce45c23a21aade  ./FIX-PREVIEW3
 ba3fa733e7ee44173d4c5319b2b687049d79365dc203103f05870cc16849f778  ./MIGRATION-FROM-v1.2.md
 02308cfa2d32ddff943ca265a076d9280e3813018a618b554f10da5ca2ad35ca  ./README.md
 ace7251dd43490ebfcf371058b493f45b9a600425053243825df9b54ba8521bb  ./START-HERE.txt
-1569177f6ad60f3dbe30606972ecf1298f300b4f1de0acb63ee0d04b6c97045d  ./SaeParTunnel.CrossPlatform.sln
+69bd68711857dac99d4f012daaaad7a7efd88368161976bb8506feacf2cbd5cb  ./SaeParTunnel.CrossPlatform.sln
 a6aacc17bffbd558a173388fca68065ecdf07ebf5dd05a333c64c236ab2cd03c  ./THIRD-PARTY-NOTICES.md
 6921cf9ee172ba0812ba2254f1afec7a7e3c34172656b81dfe63a51c009e0ece  ./VALIDATION.md
 110c83b6f2cb304da18fed3776bd03c9fe6d88ec2a09f4dac7145e0da6fd1dca  ./docs/ARCHITECTURE.md
@@ -93,3 +93,7 @@ c08b676c0bbf78ee2abf99f5e182a6b1cdd7891b8706cbd1a5a412361f69f902  ./src/SaeParTu
 39a884a2a9122af260e03a9ae46481bde3950809e2248261518b5e2e3a17343a  ./src/SaeParTunnel.Core/Services/EndpointPrecheckService.cs
 563676adf435be96beb6dc38c768586d10468caa325f14945421c6cdd8312881  ./src/SaeParTunnel.Core/Services/GitHubConfigService.cs
 2894586825b8740d9c93ee7a2e74a2d736c0db619e96072e710e45a9cf17766a  ./src/SaeParTunnel.Core/Services/XrayConfigBuilder.cs
+740ee98407ed3547fc46e55f198bff0c98a6c3451a8744733a3bd49c80b09f29  ./tests/SaeParTunnel.Core.Tests/ConfigExtractorTests.cs
+ac955dc43d86b82fb1a9284ce709c9104e423aed51bae18a77264468aee5ae2f  ./tests/SaeParTunnel.Core.Tests/ConfigParserTests.cs
+ae62e873e68ac67566eb80c8691594ea9f4ada5bee196543058325e2ddb85b53  ./tests/SaeParTunnel.Core.Tests/SaeParTunnel.Core.Tests.csproj
+894899f0652bef40debe4b3dbd5a0c81d44c4b1f2fa742550f4d509b53dc2846  ./tests/SaeParTunnel.Core.Tests/XrayConfigBuilderTests.cs
