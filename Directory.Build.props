@@ -9,5 +9,19 @@
     <BaseIntermediateOutputPath>$(LOCALAPPDATA)\SPTBuild\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
     <MSBuildProjectExtensionsPath>$(LOCALAPPDATA)\SPTBuild\obj\$(MSBuildProjectName)\</MSBuildProjectExtensionsPath>
     <BaseOutputPath>$(LOCALAPPDATA)\SPTBuild\bin\$(MSBuildProjectName)\</BaseOutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildProjectDirectory)\bin\**;$(MSBuildProjectDirectory)\obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <!--
+    Apple SDK targets compute app-bundle paths relative to the project. On
+    Windows that calculation cannot cross drive letters, so iOS outputs must
+    stay on the same volume as the source tree. The MAUI app only opts in for
+    its iOS inner build; Android and Windows retain the short path above.
+  -->
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT' and
+                            ('$(MSBuildProjectName)' == 'SaeParTunnel.iOS.Extension' or
+                             '$(MSBuildProjectName)' == 'SaeParTunnel.iOSBinding' or
+                             ('$(MSBuildProjectName)' == 'SaeParTunnel.App' and '$(TargetFramework)' == 'net9.0-ios'))">
+    <BaseOutputPath>$(MSBuildProjectDirectory)\bin\</BaseOutputPath>
   </PropertyGroup>
 </Project>
