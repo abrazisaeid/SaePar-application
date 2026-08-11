@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0-ios</TargetFramework>
+    <RootNamespace>SaeParTunnel.iOSBinding</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <NativeReference Include="..\..\native\ios\LibXray.xcframework">
+      <Kind>Static</Kind>
+      <ForceLoad>true</ForceLoad>
+      <SmartLink>false</SmartLink>
+      <Frameworks>CoreFoundation Foundation Network Security SystemConfiguration</Frameworks>
+    </NativeReference>
+  </ItemGroup>
+
+  <Target Name="EnsureLibXrayAppleArtifact" BeforeTargets="PrepareForBuild"
+          Condition="!Exists('..\..\native\ios\LibXray.xcframework\Info.plist')">
+    <Error Text="LibXray.xcframework is missing. Run native/ios/fetch-libxray.sh on macOS before building iOS." />
+  </Target>
+</Project>

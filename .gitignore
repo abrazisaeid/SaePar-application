@@ -12,3 +12,4 @@ artifacts/
 src/SaeParTunnel.App/Resources/Raw/native-private/
 
 src/SaeParTunnel.AndroidBinding/Libraries/libXray.aar
+native/ios/LibXray.xcframework/
