@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, for example v2.0.20"
+        description: "Release tag, for example v2.0.21"
         required: true
         type: string
 
@@ -97,6 +97,6 @@ jobs:
           } else {
             gh release create $tag $assets `
               --title "SaePar Tunnel $tag" `
-              --notes "Release build for Android and Windows." `
+              --generate-notes `
               --target "${{ github.sha }}"
           }

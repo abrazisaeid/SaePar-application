@@ -63,9 +63,9 @@ To convert the local keystore to a GitHub secret value:
 Create and publish a release:
 
 ```powershell
-git tag -a v2.0.20 -m "SaePar Tunnel v2.0.20"
+git tag -a v2.0.21 -m "SaePar Tunnel v2.0.21"
 git push origin main
-git push origin v2.0.20
+git push origin v2.0.21
 ```
 
 The `Release` workflow builds the APK and Windows ZIP, then uploads them to the GitHub Release for that tag.

@@ -1,5 +1,5 @@
 df79b3634b9ef347e5878d384b562469cee1cdf132fe3f853fcf5deb125b170c  ./.github/workflows/ci.yml
-ae9cb81044b3a768d191a665aedeabf38c9aafeb1dfff1acbbe62b927db40fd5  ./.github/workflows/release.yml
+14dfdd6ecca1ace6d170c31985926ee4cc920975d5ee859ace68fbfa18fd0beb  ./.github/workflows/release.yml
 ce51001d0601e9cd444c31991ea8c65fa5dd145fda470e478db8c4e620869053  ./.gitignore
 2b52626943f12da181f0c0641de9e4cb01dd0c949ce9c2c59d943b67fff64d6d  ./ANDROID-VPN-PREVIEW13.md
 6edf8a4bcf47d95f61b69ec6bc6285e0c0a5bfdcfdfd13077db1230a9903485b  ./Directory.Build.props
@@ -28,7 +28,7 @@ ace7251dd43490ebfcf371058b493f45b9a600425053243825df9b54ba8521bb  ./START-HERE.t
 a6aacc17bffbd558a173388fca68065ecdf07ebf5dd05a333c64c236ab2cd03c  ./THIRD-PARTY-NOTICES.md
 6921cf9ee172ba0812ba2254f1afec7a7e3c34172656b81dfe63a51c009e0ece  ./VALIDATION.md
 110c83b6f2cb304da18fed3776bd03c9fe6d88ec2a09f4dac7145e0da6fd1dca  ./docs/ARCHITECTURE.md
-7f475b07af9777b4243c2238c187ae5777a0a9b17ea1cef6d76d382ef4a1b513  ./docs/RELEASE.md
+b7a62b4fc38d2078fc0bb024e8724eedbfd81d881ee8374a9d89b8647b200e97  ./docs/RELEASE.md
 2693f0081d22422714daa1d306742a5654d9d856ad0a84151b179adac6b789b0  ./global.json
 dbca1000edbfad93f598389e34c102c7e1b107d9b4182c9c16b3aaf5f08b2ce9  ./native/android/README.md
 f49469de4e28216e0446a80bafbcdf017eb74ff775ab7964e69021e2ca2f8600  ./native/android/VpnService.template.cs.txt
@@ -80,7 +80,7 @@ d562288c1cb2937511cb7b394f77aba66b4a3789044351b62d8beaa8ea2c4786  ./src/SaeParTu
 d562288c1cb2937511cb7b394f77aba66b4a3789044351b62d8beaa8ea2c4786  ./src/SaeParTunnel.App/Resources/Splash/splash.svg
 fb63fb259872c5194f4629a20a3a81465bcd805a8f5dab6654b015aeb5d6865c  ./src/SaeParTunnel.App/Resources/Styles/Colors.xaml
 5560c59c2b3b9eb1858b062c9bbaef33167110ab1341fd90848788a0522be7c3  ./src/SaeParTunnel.App/Resources/Styles/Styles.xaml
-9dd62c3f43ac879258b6671c663aa5121977357e4c674e1bc25ecc3a89776086  ./src/SaeParTunnel.App/SaeParTunnel.App.csproj
+7656b588f421b3b5478e162194c2b1db65c160297670770e99a8b7c31bd4289d  ./src/SaeParTunnel.App/SaeParTunnel.App.csproj
 2ed2393ba37dfdd994a7aaee078ad8ba399215da8b886edb7f49d99fb115a909  ./src/SaeParTunnel.App/Services/MauiJsonStore.cs
 815b18bb01d748d470640eb76280a0e845f66f8b22573be7c3d359381115fb5c  ./src/SaeParTunnel.App/Services/ObservableObject.cs
 ed2db62fcc4e85f09b59a5db5d5c20d1cd17ccbf84d810d6a3891f5f5ff53c66  ./src/SaeParTunnel.App/Services/ObservableRangeCollection.cs
