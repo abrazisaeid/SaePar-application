@@ -41,17 +41,22 @@ public sealed class MauiJsonStore
     {
         EnsureCreated();
         var settings = await ReadAsync<AppSettings>(SettingsPath) ?? new AppSettings();
+        var shouldSave = settings.DataSchemaVersion < new AppSettings().DataSchemaVersion;
         settings.DataSchemaVersion = Math.Max(settings.DataSchemaVersion, new AppSettings().DataSchemaVersion);
         settings.WhitelistApplications ??= new List<WhitelistApplication>();
         settings.WhitelistWebsites ??= new List<string>();
-        if (string.IsNullOrWhiteSpace(settings.GitHubSubscriptionUrl))
-            settings.GitHubSubscriptionUrl = GitHubConfigService.DefaultSubscriptionUrl;
+        shouldSave |= SubscriptionCatalog.Normalize(settings);
         settings.CommunityHealthIndexUrl ??= string.Empty;
         settings.CommunityHealthETag ??= string.Empty;
 #if WINDOWS
         if (string.IsNullOrWhiteSpace(settings.XrayPath))
+        {
             settings.XrayPath = Path.Combine(RuntimePath, "xray.exe");
+            shouldSave = true;
+        }
 #endif
+        if (shouldSave)
+            await SaveSettingsAsync(settings);
         return settings;
     }
 

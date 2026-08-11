@@ -39,13 +39,6 @@
             </Border>
             <Border Style="{StaticResource Card}">
                 <VerticalStackLayout Spacing="12">
-                    <Label Text="منبع کانفیگ" FontSize="19" FontAttributes="Bold" />
-                    <Entry Text="{Binding Settings.GitHubSubscriptionUrl}" FlowDirection="LeftToRight" />
-                    <Label Text="منبع پیش‌فرض: Epodonios/v2ray-configs / All_Configs_Sub.txt" Style="{StaticResource SubtleLabel}" />
-                </VerticalStackLayout>
-            </Border>
-            <Border Style="{StaticResource Card}">
-                <VerticalStackLayout Spacing="12">
                     <Label Text="داده جمعی سرورها" FontSize="19" FontAttributes="Bold" />
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                         <VerticalStackLayout Grid.Column="0" Spacing="2">

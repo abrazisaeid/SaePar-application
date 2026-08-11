@@ -2,7 +2,7 @@ namespace SaeParTunnel.Core.Models;
 
 public sealed class AppSettings
 {
-    public int DataSchemaVersion { get; set; } = 25;
+    public int DataSchemaVersion { get; set; } = 26;
     public string XrayPath { get; set; } = string.Empty;
     public int SocksPort { get; set; } = 10808;
     public int HttpPort { get; set; } = 10809;
@@ -24,8 +24,11 @@ public sealed class AppSettings
     public List<WhitelistApplication> WhitelistApplications { get; set; } = new();
     public List<string> WhitelistWebsites { get; set; } = new();
 
+    public List<SubscriptionSource> Subscriptions { get; set; } = new();
+
+    // Retained so settings from older releases can be migrated without data loss.
     public string GitHubSubscriptionUrl { get; set; } =
-        "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt";
+        SubscriptionSource.BuiltInUrl;
     public string GitHubETag { get; set; } = string.Empty;
     public DateTime? LastGitHubFetchUtc { get; set; }
 

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using SaeParTunnel.Core.Models;
 
 namespace SaeParTunnel.Core.Services;
 
@@ -16,8 +17,7 @@ public sealed class GitHubConfigFetchResult
 public sealed class GitHubConfigService : IDisposable
 {
     public const string RepositoryUrl = "https://github.com/Epodonios/v2ray-configs";
-    public const string DefaultSubscriptionUrl =
-        "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt";
+    public const string DefaultSubscriptionUrl = SubscriptionSource.BuiltInUrl;
 
     private static readonly string[] DefaultFallbackUrls =
     {
@@ -149,7 +149,7 @@ public sealed class GitHubConfigService : IDisposable
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
             !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("آدرس منبع GitHub معتبر نیست؛ فقط HTTPS مجاز است.");
+            throw new InvalidOperationException("آدرس اشتراک معتبر نیست؛ فقط HTTPS مجاز است.");
         }
     }
 

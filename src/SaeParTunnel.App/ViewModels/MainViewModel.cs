@@ -28,7 +28,8 @@ public sealed class MainViewModel : ObservableObject
         Disconnecting
     }
 
-    private const string GitHubSource = "GitHub: Epodonios/v2ray-configs";
+    private sealed record SubscriptionFetchOutcome(int Added, bool NotModified, string Host, string Route);
+
     private readonly MauiJsonStore _store;
     private readonly ConfigExtractor _extractor;
     private readonly GitHubConfigService _github;
@@ -56,6 +57,8 @@ public sealed class MainViewModel : ObservableObject
     private double _progressPercent;
     private string _progressSpeed = "-", _progressEta = "-", _testGoalMessage = "";
     private string _newWebsite = "", _newApplication = "";
+    private string _newSubscriptionName = "", _newSubscriptionUrl = "";
+    private bool _isSubscriptionEditorExpanded;
     private string _communityHealthStatusMessage = "داده جمعی خاموش است. برای استفاده، یک آدرس HTTPS JSON عمومی وارد کن.";
     private string _connectionStatusMessage = "اتصال فعال نیست.";
     private string _diagnosticsReport = "هنوز عیب‌یابی اجرا نشده است.";
@@ -67,6 +70,17 @@ public sealed class MainViewModel : ObservableObject
         _store = store; _extractor = extractor; _github = github; _communityHealth = communityHealth; _tunnel = tunnel;
 
         GetConfigCommand = new Command(async () => await RunSafeAsync(GetConfigAsync));
+        FetchSubscriptionCommand = new Command<SubscriptionSourceViewModel>(async source =>
+        {
+            if (source is not null) await RunSafeAsync(() => FetchSubscriptionAsync(source));
+        });
+        ToggleSubscriptionCommand = new Command<SubscriptionSourceViewModel>(source => source?.ToggleExpanded());
+        ToggleSubscriptionEditorCommand = new Command(ToggleSubscriptionEditor);
+        AddSubscriptionCommand = new Command(async () => await RunSafeAsync(AddSubscriptionAsync));
+        RemoveSubscriptionCommand = new Command<SubscriptionSourceViewModel>(async source =>
+        {
+            if (source is not null) await RunSafeAsync(() => RemoveSubscriptionAsync(source));
+        });
         RefreshCommunityHealthCommand = new Command(async () => await RunSafeAsync(async () => await RefreshCommunityHealthAsync()));
         ImportClipboardCommand = new Command(async () => await RunSafeAsync(ImportClipboardAsync));
         TestFilteredCommand = new Command(async () => await RunSafeAsync(TestFilteredAsync));
@@ -101,6 +115,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableRangeCollection<ConfigProfile> Profiles { get; } = new();
     public ObservableRangeCollection<ConfigProfile> FilteredProfiles { get; } = new();
     public ObservableRangeCollection<ConfigProfile> HealthyProfiles { get; } = new();
+    public ObservableRangeCollection<SubscriptionSourceViewModel> SubscriptionSources { get; } = new();
     public ObservableRangeCollection<string> WhitelistWebsites { get; } = new();
     public ObservableRangeCollection<WhitelistApplication> WhitelistApplications { get; } = new();
     public IReadOnlyList<string> StatusFilters { get; } = new[] { "همه", "سالم", "TCP قابل دسترس", "ناموفق", "تست نشده", "پشتیبانی‌نشده" };
@@ -287,7 +302,7 @@ public sealed class MainViewModel : ObservableObject
             ? "بدون کانفیگ Full-Test سالم"
             : $"{WorkingProfiles:N0} کانفیگ Full-Test سالم آماده اتصال است.";
     public string ConfigFlowNextStep => TotalProfiles == 0
-        ? "اول کانفیگ‌ها را از GitHub یا Clipboard وارد کن."
+        ? "اول کانفیگ‌ها را از Subscription یا Clipboard وارد کن."
         : WorkingProfiles == 0
             ? "حالا تست سلامت را اجرا کن تا چند سرور قابل اعتماد پیدا شود."
             : "بهترین سرور آماده است؛ می‌توانی از خانه با اتصال سریع وصل شوی.";
@@ -322,8 +337,26 @@ public sealed class MainViewModel : ObservableObject
 
     public string NewWebsite { get => _newWebsite; set => SetProperty(ref _newWebsite, value); }
     public string NewApplication { get => _newApplication; set => SetProperty(ref _newApplication, value); }
+    public string NewSubscriptionName { get => _newSubscriptionName; set => SetProperty(ref _newSubscriptionName, value ?? string.Empty); }
+    public string NewSubscriptionUrl { get => _newSubscriptionUrl; set => SetProperty(ref _newSubscriptionUrl, value ?? string.Empty); }
+    public bool IsSubscriptionEditorExpanded
+    {
+        get => _isSubscriptionEditorExpanded;
+        private set
+        {
+            if (!SetProperty(ref _isSubscriptionEditorExpanded, value)) return;
+            OnPropertyChanged(nameof(SubscriptionEditorGlyph));
+        }
+    }
+    public string SubscriptionEditorGlyph => IsSubscriptionEditorExpanded ? "−" : "+";
+    public string SubscriptionSummaryText => $"{SubscriptionSources.Count(x => x.IsEnabled):N0} منبع فعال از {SubscriptionSources.Count:N0}";
 
     public Command GetConfigCommand { get; }
+    public Command<SubscriptionSourceViewModel> FetchSubscriptionCommand { get; }
+    public Command<SubscriptionSourceViewModel> ToggleSubscriptionCommand { get; }
+    public Command ToggleSubscriptionEditorCommand { get; }
+    public Command AddSubscriptionCommand { get; }
+    public Command<SubscriptionSourceViewModel> RemoveSubscriptionCommand { get; }
     public Command RefreshCommunityHealthCommand { get; }
     public Command ImportClipboardCommand { get; }
     public Command TestFilteredCommand { get; }
@@ -390,6 +423,7 @@ public sealed class MainViewModel : ObservableObject
         {
             _store.EnsureCreated();
             Settings = await _store.LoadSettingsAsync();
+            LoadSubscriptionSources();
             ShowAdvancedConfigTools = !Settings.QuickMode;
             if (Settings.TestConcurrency <= 0)
                 Settings.TestConcurrency = DeviceInfo.Platform == DevicePlatform.WinUI ? 24 : DeviceInfo.Platform == DevicePlatform.Android ? 6 : 4;
@@ -462,45 +496,231 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task GetConfigAsync()
     {
+        var activeSources = SubscriptionSources.Where(x => x.IsEnabled).ToList();
+        if (activeSources.Count == 0)
+        {
+            StatusMessage = "حداقل یک منبع اشتراک را فعال کن.";
+            return;
+        }
+
         IsBusy = true;
-        StatusMessage = "در حال دریافت کانفیگ‌ها...";
+        StatusMessage = $"در حال دریافت از {activeSources.Count:N0} منبع فعال...";
         try
         {
-            var result = await _github.FetchAsync(Settings.GitHubSubscriptionUrl, Settings.GitHubETag);
-            Settings.LastGitHubFetchUtc = DateTime.UtcNow;
-            var host = Uri.TryCreate(result.SourceUrl, UriKind.Absolute, out var uri) ? uri.Host : "source";
-            var route = result.UsedDirectConnection ? "direct fallback" : "system route";
+            var existing = Profiles
+                .GroupBy(x => x.Id, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
+            var failures = new List<string>();
+            var added = 0;
+            var unchanged = 0;
+            var succeeded = 0;
 
-            if (!result.NotModified)
+            for (var index = 0; index < activeSources.Count; index++)
             {
-                StatusMessage = $"دریافت شد از {host}؛ در حال پردازش...";
-                var extracted = await Task.Run(() => _extractor.Extract(result.Content, GitHubSource).ToList());
-                var existing = Profiles.ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
-                var additions = new List<ConfigProfile>();
-                foreach (var profile in extracted)
+                var source = activeSources[index];
+                StatusMessage = $"در حال دریافت {index + 1:N0} از {activeSources.Count:N0} • {source.Name}";
+                try
                 {
-                    if (existing.TryGetValue(profile.Id, out var old)) { old.LastSeen = DateTime.Now; continue; }
-                    additions.Add(profile); existing[profile.Id] = profile;
+                    var outcome = await FetchSubscriptionCoreAsync(source, existing);
+                    added += outcome.Added;
+                    unchanged += outcome.NotModified ? 1 : 0;
+                    succeeded++;
                 }
-                Profiles.AddRange(additions);
-                Settings.GitHubETag = result.ETag;
-                await _store.SaveProfilesAsync(Profiles);
-                StatusMessage = $"Get Config: {additions.Count:N0} جدید • {host} • {route}";
-            }
-            else
-            {
-                StatusMessage = $"Get Config: تغییری نیست • {host} • {route}";
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    failures.Add($"{source.Name}: {HumanizeException(ex)}");
+                }
             }
 
-            await _store.SaveSettingsAsync(Settings);
-            await TryRefreshCommunityHealthAfterConfigAsync();
-            RefreshFilters();
-            RefreshStats();
+            if (succeeded > 0)
+            {
+                await _store.SaveProfilesAsync(Profiles);
+                await PersistSubscriptionSettingsAsync();
+                await TryRefreshCommunityHealthAfterConfigAsync();
+                RefreshFilters();
+                RefreshStats();
+            }
+
+            StatusMessage = failures.Count == 0
+                ? $"دریافت کامل شد • {added:N0} کانفیگ جدید • {unchanged:N0} منبع بدون تغییر"
+                : $"{succeeded:N0} منبع دریافت شد و {failures.Count:N0} منبع خطا داشت • {added:N0} کانفیگ جدید";
+
+            if (failures.Count > 0 && Shell.Current is not null)
+            {
+                var details = string.Join("\n", failures.Take(5));
+                await Shell.Current.DisplayAlert("گزارش دریافت Subscription", details, "باشه");
+            }
         }
         finally
         {
             IsBusy = false;
         }
+    }
+
+    private async Task FetchSubscriptionAsync(SubscriptionSourceViewModel source)
+    {
+        IsBusy = true;
+        StatusMessage = $"در حال دریافت از {source.Name}...";
+        try
+        {
+            var existing = Profiles
+                .GroupBy(x => x.Id, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
+            var outcome = await FetchSubscriptionCoreAsync(source, existing);
+            await _store.SaveProfilesAsync(Profiles);
+            await PersistSubscriptionSettingsAsync();
+            await TryRefreshCommunityHealthAfterConfigAsync();
+            RefreshFilters();
+            RefreshStats();
+            StatusMessage = outcome.NotModified
+                ? $"{source.Name} تغییری نداشت • {outcome.Host} • {outcome.Route}"
+                : $"{source.Name} دریافت شد • {outcome.Added:N0} کانفیگ جدید • {outcome.Host} • {outcome.Route}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task<SubscriptionFetchOutcome> FetchSubscriptionCoreAsync(
+        SubscriptionSourceViewModel item,
+        IDictionary<string, ConfigProfile> existing)
+    {
+        var source = item.Source;
+        var result = await _github.FetchAsync(source.Url, source.ETag);
+        source.LastFetchedUtc = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(result.ETag))
+            source.ETag = result.ETag;
+        item.RefreshFetchMetadata();
+
+        var host = Uri.TryCreate(result.SourceUrl, UriKind.Absolute, out var uri) ? uri.Host : "source";
+        var route = result.UsedDirectConnection ? "direct fallback" : "system route";
+        if (result.NotModified)
+            return new SubscriptionFetchOutcome(0, true, host, route);
+
+        StatusMessage = $"{item.Name} دریافت شد؛ در حال پردازش...";
+        var extracted = await Task.Run(() => _extractor.Extract(result.Content, $"Subscription: {item.Name}").ToList());
+        if (extracted.Count == 0)
+            throw new InvalidDataException("Subscription دریافت شد، اما هیچ کانفیگ پشتیبانی‌شده‌ای در آن پیدا نشد.");
+
+        var additions = new List<ConfigProfile>();
+        foreach (var profile in extracted)
+        {
+            if (existing.TryGetValue(profile.Id, out var old))
+            {
+                old.LastSeen = DateTime.Now;
+                continue;
+            }
+
+            additions.Add(profile);
+            existing[profile.Id] = profile;
+        }
+
+        Profiles.AddRange(additions);
+        return new SubscriptionFetchOutcome(additions.Count, false, host, route);
+    }
+
+    private void LoadSubscriptionSources()
+    {
+        SubscriptionSources.ReplaceRange(Settings.Subscriptions.Select((source, index) =>
+            new SubscriptionSourceViewModel(source, OnSubscriptionSourceChanged, isExpanded: index == 0)));
+        OnPropertyChanged(nameof(SubscriptionSummaryText));
+    }
+
+    private void ToggleSubscriptionEditor() => IsSubscriptionEditorExpanded = !IsSubscriptionEditorExpanded;
+
+    private async Task AddSubscriptionAsync()
+    {
+        if (!SubscriptionCatalog.TryNormalizeHttpsUrl(NewSubscriptionUrl, out var url))
+            throw new InvalidOperationException("آدرس Subscription باید یک URL کامل و امن با https:// باشد.");
+
+        var existing = SubscriptionSources.FirstOrDefault(x => SubscriptionCatalog.UrlsEqual(x.Url, url));
+        if (existing is not null)
+        {
+            existing.Expand();
+            existing.IsEnabled = true;
+            NewSubscriptionName = string.Empty;
+            NewSubscriptionUrl = string.Empty;
+            IsSubscriptionEditorExpanded = false;
+            StatusMessage = "این Subscription از قبل در فهرست وجود دارد.";
+            return;
+        }
+
+        var name = NewSubscriptionName.Trim();
+        if (name.Length == 0 && Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            name = uri.Host;
+
+        var source = new SubscriptionSource
+        {
+            Name = name.Length == 0 ? "اشتراک شخصی" : name,
+            Url = url,
+            IsEnabled = true
+        };
+        var item = new SubscriptionSourceViewModel(source, OnSubscriptionSourceChanged, isExpanded: true);
+        SubscriptionSources.Add(item);
+        NewSubscriptionName = string.Empty;
+        NewSubscriptionUrl = string.Empty;
+        IsSubscriptionEditorExpanded = false;
+        await PersistSubscriptionSettingsAsync();
+        OnPropertyChanged(nameof(SubscriptionSummaryText));
+        StatusMessage = $"Subscription «{source.Name}» اضافه شد؛ برای دریافت، دکمه همان منبع یا دریافت از همه را بزن.";
+    }
+
+    private async Task RemoveSubscriptionAsync(SubscriptionSourceViewModel item)
+    {
+        if (!item.CanRemove)
+        {
+            StatusMessage = "منبع پیش‌فرض قابل حذف نیست؛ می‌توانی آن را غیرفعال کنی.";
+            return;
+        }
+
+        var confirmed = Shell.Current is null ||
+                        await Shell.Current.DisplayAlert(
+                            "حذف Subscription",
+                            $"منبع «{item.Name}» حذف شود؟ کانفیگ‌هایی که قبلاً دریافت شده‌اند باقی می‌مانند.",
+                            "حذف",
+                            "انصراف");
+        if (!confirmed) return;
+
+        SubscriptionSources.Remove(item);
+        await PersistSubscriptionSettingsAsync();
+        OnPropertyChanged(nameof(SubscriptionSummaryText));
+        StatusMessage = $"Subscription «{item.Name}» حذف شد.";
+    }
+
+    private void OnSubscriptionSourceChanged()
+    {
+        OnPropertyChanged(nameof(SubscriptionSummaryText));
+        _ = PersistSubscriptionSettingsSafelyAsync();
+    }
+
+    private async Task PersistSubscriptionSettingsSafelyAsync()
+    {
+        try
+        {
+            await PersistSubscriptionSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = "ذخیره وضعیت Subscription ناموفق بود: " + HumanizeException(ex);
+        }
+    }
+
+    private async Task PersistSubscriptionSettingsAsync()
+    {
+        SyncSubscriptionSettings();
+        await _store.SaveSettingsAsync(Settings);
+        RefreshDiagnosticsReport();
+    }
+
+    private void SyncSubscriptionSettings()
+    {
+        Settings.Subscriptions = SubscriptionSources.Select(x => x.Source).ToList();
+        var builtIn = Settings.Subscriptions.FirstOrDefault(x => x.IsBuiltIn);
+        if (builtIn is null) return;
+        Settings.GitHubSubscriptionUrl = builtIn.Url;
+        Settings.GitHubETag = builtIn.ETag;
+        Settings.LastGitHubFetchUtc = builtIn.LastFetchedUtc;
     }
 
     private async Task TryRefreshCommunityHealthAfterConfigAsync()
@@ -1371,8 +1591,13 @@ public sealed class MainViewModel : ObservableObject
         builder.AppendLine($"Quick mode: {Settings.QuickMode}");
         builder.AppendLine($"Auto reconnect: {Settings.AutoReconnect} ({Settings.AutoReconnectAttempts})");
         builder.AppendLine($"System proxy: {Settings.EnableSystemProxy}");
-        builder.AppendLine($"GitHub source: {Settings.GitHubSubscriptionUrl}");
-        builder.AppendLine($"Last fetch: {(Settings.LastGitHubFetchUtc is null ? "-" : Settings.LastGitHubFetchUtc.Value.ToLocalTime().ToString("yyyy/MM/dd HH:mm"))}");
+        builder.AppendLine($"Subscriptions: total={SubscriptionSources.Count}, active={SubscriptionSources.Count(x => x.IsEnabled)}");
+        foreach (var source in SubscriptionSources)
+        {
+            var host = Uri.TryCreate(source.Url, UriKind.Absolute, out var sourceUri) ? sourceUri.Host : "invalid";
+            var lastFetch = source.Source.LastFetchedUtc?.ToLocalTime().ToString("yyyy/MM/dd HH:mm") ?? "-";
+            builder.AppendLine($"Subscription: {source.Name} | active={source.IsEnabled} | host={host} | last={lastFetch}");
+        }
         builder.AppendLine($"Community health: enabled={Settings.EnableCommunityHealth}, scored={Profiles.Count(x => x.HasCommunityHealth)}, url={Settings.CommunityHealthIndexUrl}");
         builder.AppendLine($"Community health fetch: {(Settings.LastCommunityHealthFetchUtc is null ? "-" : Settings.LastCommunityHealthFetchUtc.Value.ToLocalTime().ToString("yyyy/MM/dd HH:mm"))}");
         if (IsWindows) builder.AppendLine($"Xray path: {(string.IsNullOrWhiteSpace(Settings.XrayPath) ? "auto" : Settings.XrayPath)}");
@@ -1451,6 +1676,7 @@ public sealed class MainViewModel : ObservableObject
         Settings.AutoReconnectAttempts = Math.Clamp(Settings.AutoReconnectAttempts <= 0 ? 3 : Settings.AutoReconnectAttempts, 1, 5);
         Settings.WhitelistWebsites = WhitelistWebsites.ToList();
         Settings.WhitelistApplications = WhitelistApplications.ToList();
+        SyncSubscriptionSettings();
         await _store.SaveSettingsAsync(Settings);
         OnPropertyChanged(nameof(QuickMode));
         OnPropertyChanged(nameof(AutoReconnect));
