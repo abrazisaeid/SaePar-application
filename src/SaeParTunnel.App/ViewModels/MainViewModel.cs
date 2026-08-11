@@ -6,6 +6,7 @@ using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Devices;
 using Microsoft.Maui.Storage;
+using SaeParTunnel.App.Pages;
 using SaeParTunnel.App.Services;
 using SaeParTunnel.Core.Abstractions;
 using SaeParTunnel.Core.Models;
@@ -34,6 +35,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly ConfigExtractor _extractor;
     private readonly GitHubConfigService _github;
     private readonly CommunityHealthService _communityHealth;
+    private readonly QrCodeService _qrCode;
     private readonly ITunnelService _tunnel;
     private AppSettings _settings = new();
     private ConfigProfile? _selectedProfile;
@@ -65,9 +67,15 @@ public sealed class MainViewModel : ObservableObject
     private ConfigProfile? _recommendedHealthyProfile;
     private int _totalProfiles, _workingProfiles, _reachableProfiles, _failedProfiles, _untestedProfiles;
 
-    public MainViewModel(MauiJsonStore store, ConfigExtractor extractor, GitHubConfigService github, CommunityHealthService communityHealth, ITunnelService tunnel)
+    public MainViewModel(
+        MauiJsonStore store,
+        ConfigExtractor extractor,
+        GitHubConfigService github,
+        CommunityHealthService communityHealth,
+        QrCodeService qrCode,
+        ITunnelService tunnel)
     {
-        _store = store; _extractor = extractor; _github = github; _communityHealth = communityHealth; _tunnel = tunnel;
+        _store = store; _extractor = extractor; _github = github; _communityHealth = communityHealth; _qrCode = qrCode; _tunnel = tunnel;
 
         GetConfigCommand = new Command(async () => await RunSafeAsync(GetConfigAsync));
         FetchSubscriptionCommand = new Command<SubscriptionSourceViewModel>(async source =>
@@ -80,6 +88,10 @@ public sealed class MainViewModel : ObservableObject
         RemoveSubscriptionCommand = new Command<SubscriptionSourceViewModel>(async source =>
         {
             if (source is not null) await RunSafeAsync(() => RemoveSubscriptionAsync(source));
+        });
+        ShareProfileCommand = new Command<ConfigProfile>(async profile =>
+        {
+            if (profile is not null) await ShareProfileSafelyAsync(profile);
         });
         RefreshCommunityHealthCommand = new Command(async () => await RunSafeAsync(async () => await RefreshCommunityHealthAsync()));
         ImportClipboardCommand = new Command(async () => await RunSafeAsync(ImportClipboardAsync));
@@ -136,6 +148,7 @@ public sealed class MainViewModel : ObservableObject
                 OnPropertyChanged(nameof(SelectedHealthyProfile));
                 OnPropertyChanged(nameof(SelectedHealthyPingText));
                 OnPropertyChanged(nameof(HealthySelectionSummary));
+                OnPropertyChanged(nameof(HasSelectedHealthyProfile));
             }
         }
     }
@@ -148,14 +161,16 @@ public sealed class MainViewModel : ObservableObject
             if (value is not null) SelectedProfile = value;
             OnPropertyChanged(nameof(SelectedHealthyPingText));
             OnPropertyChanged(nameof(HealthySelectionSummary));
+            OnPropertyChanged(nameof(HasSelectedHealthyProfile));
         }
     }
+    public bool HasSelectedHealthyProfile => SelectedHealthyProfile is not null;
     public string SelectedProfileSummary => SelectedProfile is null ? "کانفیگی انتخاب نشده" : $"{SelectedProfile.ProtocolText} • {SelectedProfile.Endpoint} • {SelectedProfile.HealthText} • {SelectedProfile.LatencyText}";
     public string SelectedHealthyPingText => SelectedHealthyProfile?.LatencyMs is int ms ? $"{ms} ms" : "-";
     public string HealthySelectionSummary => SelectedHealthyProfile is null
         ? "هنوز سرور سالمی انتخاب نشده است."
         : $"{SelectedHealthyProfile.ProtocolText} • {SelectedHealthyProfile.Endpoint} • آخرین Ping: {SelectedHealthyProfile.LatencyText}";
-    private ConfigProfile? RecommendedHealthyProfile => _recommendedHealthyProfile;
+    public ConfigProfile? RecommendedHealthyProfile => _recommendedHealthyProfile;
     private bool RecommendedProfileIsCommunityOnly => RecommendedHealthyProfile is { Health: not ProfileHealth.Working } profile && IsTrustedCommunityCandidate(profile);
     public bool HasRecommendedProfile => RecommendedHealthyProfile is not null;
     public bool NoRecommendedProfile => !HasRecommendedProfile;
@@ -357,6 +372,7 @@ public sealed class MainViewModel : ObservableObject
     public Command ToggleSubscriptionEditorCommand { get; }
     public Command AddSubscriptionCommand { get; }
     public Command<SubscriptionSourceViewModel> RemoveSubscriptionCommand { get; }
+    public Command<ConfigProfile> ShareProfileCommand { get; }
     public Command RefreshCommunityHealthCommand { get; }
     public Command ImportClipboardCommand { get; }
     public Command TestFilteredCommand { get; }
@@ -407,6 +423,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void NotifyRecommendedProfileChanged()
     {
+        OnPropertyChanged(nameof(RecommendedHealthyProfile));
         OnPropertyChanged(nameof(HasRecommendedProfile));
         OnPropertyChanged(nameof(NoRecommendedProfile));
         OnPropertyChanged(nameof(RecommendedProfileName));
@@ -721,6 +738,90 @@ public sealed class MainViewModel : ObservableObject
         Settings.GitHubSubscriptionUrl = builtIn.Url;
         Settings.GitHubETag = builtIn.ETag;
         Settings.LastGitHubFetchUtc = builtIn.LastFetchedUtc;
+    }
+
+    private async Task ShareProfileSafelyAsync(ConfigProfile profile)
+    {
+        try
+        {
+            await ShareProfileAsync(profile);
+        }
+        catch (Exception ex)
+        {
+            var message = HumanizeException(ex);
+            StatusMessage = "اشتراک‌گذاری انجام نشد: " + message;
+            if (Shell.Current is not null)
+                await Shell.Current.DisplayAlert("اشتراک‌گذاری انجام نشد", message, "باشه");
+        }
+    }
+
+    private async Task ShareProfileAsync(ConfigProfile profile)
+    {
+        var shareText = (profile.OriginalUri ?? string.Empty).Trim();
+        if (shareText.Length == 0)
+            throw new InvalidOperationException("لینک اصلی این کانفیگ برای اشتراک‌گذاری موجود نیست.");
+        if (Shell.Current is null)
+            throw new InvalidOperationException("صفحه اشتراک‌گذاری در دسترس نیست.");
+
+        const string shareTextChoice = "ارسال به‌صورت متن";
+        const string copyTextChoice = "کپی متن";
+        const string showQrChoice = "نمایش و ارسال QR";
+        var choice = await Shell.Current.DisplayActionSheet(
+            $"اشتراک {profile.DisplayName}",
+            "انصراف",
+            null,
+            shareTextChoice,
+            copyTextChoice,
+            showQrChoice);
+
+        switch (choice)
+        {
+            case shareTextChoice:
+                await ShareProfileTextAsync(profile, shareText);
+                break;
+            case copyTextChoice:
+                await Clipboard.Default.SetTextAsync(shareText);
+                StatusMessage = $"متن کانفیگ «{profile.DisplayName}» کپی شد.";
+                break;
+            case showQrChoice:
+                StatusMessage = "در حال ساخت QR کانفیگ...";
+                byte[] qrPng;
+                try
+                {
+                    qrPng = await Task.Run(() => _qrCode.CreatePng(shareText));
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        "ساخت QR برای این کانفیگ ممکن نشد؛ احتمالاً متن لینک از ظرفیت یک QR بیشتر است.",
+                        ex);
+                }
+
+                var details = $"{profile.ProtocolText} • {profile.Endpoint}";
+                await Shell.Current.Navigation.PushModalAsync(
+                    new ProfileSharePage(profile.DisplayName, details, shareText, qrPng));
+                StatusMessage = $"QR کانفیگ «{profile.DisplayName}» آماده است.";
+                break;
+        }
+    }
+
+    private async Task ShareProfileTextAsync(ConfigProfile profile, string shareText)
+    {
+        try
+        {
+            await Share.Default.RequestAsync(new ShareTextRequest
+            {
+                Title = $"کانفیگ {profile.DisplayName}",
+                Text = shareText
+            });
+        }
+        catch (Exception)
+        {
+            await Clipboard.Default.SetTextAsync(shareText);
+            StatusMessage = "اشتراک سیستمی در دسترس نبود؛ متن کانفیگ کپی شد.";
+            if (Shell.Current is not null)
+                await Shell.Current.DisplayAlert("متن کپی شد", StatusMessage, "باشه");
+        }
     }
 
     private async Task TryRefreshCommunityHealthAfterConfigAsync()

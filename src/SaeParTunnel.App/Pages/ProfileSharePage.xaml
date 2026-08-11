@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="SaeParTunnel.App.Pages.ProfileSharePage"
+             Title="اشتراک سرور"
+             SizeChanged="OnPageSizeChanged">
+    <Grid Padding="16">
+        <Grid RowDefinitions="Auto,*,Auto"
+              RowSpacing="12"
+              MaximumWidthRequest="560"
+              HorizontalOptions="Center">
+            <Grid Grid.Row="0" ColumnDefinitions="*,44" ColumnSpacing="8">
+                <VerticalStackLayout Grid.Column="0" Spacing="2" VerticalOptions="Center">
+                    <Label Text="اشتراک سرور" FontSize="21" FontAttributes="Bold" />
+                    <Label Text="{Binding ProfileName}"
+                           Style="{StaticResource SubtleLabel}"
+                           LineBreakMode="TailTruncation"
+                           MaxLines="1" />
+                </VerticalStackLayout>
+                <Button Grid.Column="1"
+                        Text="×"
+                        Clicked="OnCloseClicked"
+                        WidthRequest="40"
+                        HeightRequest="40"
+                        Padding="0"
+                        FontSize="22"
+                        ToolTipProperties.Text="بستن"
+                        SemanticProperties.Description="بستن صفحه اشتراک" />
+            </Grid>
+
+            <ScrollView Grid.Row="1">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="{Binding ProfileDetails}"
+                           Style="{StaticResource SubtleLabel}"
+                           HorizontalTextAlignment="Center"
+                           LineBreakMode="WordWrap" />
+
+                    <Border BackgroundColor="White"
+                            Stroke="#D7DCE2"
+                            StrokeThickness="1"
+                            Padding="12"
+                            HorizontalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
+                        <Image x:Name="QrImageView"
+                               Source="{Binding QrImage}"
+                               WidthRequest="300"
+                               HeightRequest="300"
+                               Aspect="AspectFit"
+                               SemanticProperties.Description="QR کانفیگ سرور" />
+                    </Border>
+
+                    <Editor Text="{Binding ShareText}"
+                            IsReadOnly="True"
+                            AutoSize="TextChanges"
+                            MaximumHeightRequest="120"
+                            FlowDirection="LeftToRight"
+                            HorizontalTextAlignment="Start"
+                            FontSize="12"
+                            TextColor="{StaticResource TextPrimary}"
+                            BackgroundColor="{StaticResource Surface2}" />
+
+                    <Label x:Name="ShareStatusLabel"
+                           Style="{StaticResource SubtleLabel}"
+                           HorizontalTextAlignment="Center"
+                           LineBreakMode="WordWrap" />
+                </VerticalStackLayout>
+            </ScrollView>
+
+            <VerticalStackLayout Grid.Row="2" Spacing="8">
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                    <Button Grid.Column="0"
+                            Text="ارسال متن"
+                            Clicked="OnShareTextClicked"
+                            Style="{StaticResource PrimaryButton}" />
+                    <Button Grid.Column="1"
+                            Text="کپی متن"
+                            Clicked="OnCopyTextClicked" />
+                </Grid>
+                <Button Text="ارسال تصویر QR"
+                        Clicked="OnShareQrClicked" />
+            </VerticalStackLayout>
+        </Grid>
+    </Grid>
+</ContentPage>

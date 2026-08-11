@@ -86,11 +86,20 @@
                         </Border>
                     </Grid>
 
-                    <Picker Title="سرور سالم"
-                            ItemsSource="{Binding HealthyProfiles}"
-                            SelectedItem="{Binding SelectedHealthyProfile}"
-                            ItemDisplayBinding="{Binding PickerDisplayText}"
-                            IsEnabled="{Binding CanStartConnection}" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <Picker Grid.Column="0"
+                                Title="سرور سالم"
+                                ItemsSource="{Binding HealthyProfiles}"
+                                SelectedItem="{Binding SelectedHealthyProfile}"
+                                ItemDisplayBinding="{Binding PickerDisplayText}"
+                                IsEnabled="{Binding CanStartConnection}" />
+                        <Button Grid.Column="1"
+                                Text="اشتراک"
+                                Command="{Binding ShareProfileCommand}"
+                                CommandParameter="{Binding SelectedHealthyProfile}"
+                                IsEnabled="{Binding HasSelectedHealthyProfile}"
+                                VerticalOptions="Center" />
+                    </Grid>
 
                     <Label Text="{Binding HealthySelectionSummary}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
                     <Label Text="{Binding RecommendedProfileScoreText}" TextColor="{StaticResource Success}" FontAttributes="Bold" />

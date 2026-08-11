@@ -70,11 +70,20 @@
                                    VerticalOptions="Center" />
                         </Grid>
                         <Label Text="{Binding RecommendedProfileDetails}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
-                        <Button Text="اتصال سریع به بهترین گزینه"
-                                Command="{Binding ConnectBestCommand}"
-                                IsEnabled="{Binding CanStartConnection}"
-                                IsVisible="{Binding HasRecommendedProfile}"
-                                Style="{StaticResource PrimaryButton}" />
+                        <Grid ColumnDefinitions="*,Auto"
+                              ColumnSpacing="8"
+                              IsVisible="{Binding HasRecommendedProfile}">
+                            <Button Grid.Column="0"
+                                    Text="اتصال سریع به بهترین گزینه"
+                                    Command="{Binding ConnectBestCommand}"
+                                    IsEnabled="{Binding CanStartConnection}"
+                                    Style="{StaticResource PrimaryButton}" />
+                            <Button Grid.Column="1"
+                                    Text="اشتراک"
+                                    Command="{Binding ShareProfileCommand}"
+                                    CommandParameter="{Binding RecommendedHealthyProfile}"
+                                    IsEnabled="{Binding IsNotBusy}" />
+                        </Grid>
                         <Label Text="بعد از تست سلامت، برنامه بهترین سرور را بر اساس امتیاز، Ping، تازگی تست و شکست‌های قبلی انتخاب می‌کند."
                                Style="{StaticResource SubtleLabel}"
                                IsVisible="{Binding NoRecommendedProfile}"
@@ -347,7 +356,18 @@
                                     <Label Grid.Column="1" Text="{Binding Security}" Style="{StaticResource SubtleLabel}" />
                                     <Label Grid.Column="2" Text="{Binding LatencyText}" Style="{StaticResource SubtleLabel}" />
                                 </Grid>
-                                <Label Text="{Binding QualitySummaryText}" Style="{StaticResource SubtleLabel}" />
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <Label Grid.Column="0"
+                                           Text="{Binding QualitySummaryText}"
+                                           Style="{StaticResource SubtleLabel}"
+                                           VerticalOptions="Center" />
+                                    <Button Grid.Column="1"
+                                            Text="اشتراک"
+                                            Command="{Binding BindingContext.ShareProfileCommand, Source={x:Reference ConfigsRoot}}"
+                                            CommandParameter="{Binding .}"
+                                            IsEnabled="{Binding BindingContext.IsNotBusy, Source={x:Reference ConfigsRoot}}"
+                                            Padding="12,7" />
+                                </Grid>
                             </VerticalStackLayout>
                         </Border>
                     </DataTemplate>

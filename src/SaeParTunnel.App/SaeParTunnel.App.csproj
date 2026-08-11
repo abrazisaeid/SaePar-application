@@ -59,6 +59,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Maui.Controls" Version="9.0.120" />
+    <PackageReference Include="QRCoder" Version="1.8.0" />
     <ProjectReference Include="..\SaeParTunnel.Core\SaeParTunnel.Core.csproj" />
   </ItemGroup>
 </Project>

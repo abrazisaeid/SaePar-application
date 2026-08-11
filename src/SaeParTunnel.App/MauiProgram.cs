@@ -21,6 +21,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<XrayConfigBuilder>();
         builder.Services.AddSingleton<EndpointPrecheckService>();
         builder.Services.AddSingleton<MauiJsonStore>();
+        builder.Services.AddSingleton<QrCodeService>();
 
 #if WINDOWS
         builder.Services.AddSingleton<ITunnelService, Platforms.Windows.WindowsTunnelService>();
