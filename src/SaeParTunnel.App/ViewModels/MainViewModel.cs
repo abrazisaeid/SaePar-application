@@ -197,11 +197,13 @@ public sealed class MainViewModel : ObservableObject
         private set
         {
             if (!SetProperty(ref _showAdvancedConfigTools, value)) return;
+            OnPropertyChanged(nameof(ShowConfigWorkflow));
             OnPropertyChanged(nameof(AdvancedConfigToolsText));
             OnPropertyChanged(nameof(HasMoreProfiles));
             OnPropertyChanged(nameof(VisibleProfilesLabel));
         }
     }
+    public bool ShowConfigWorkflow => !ShowAdvancedConfigTools;
     public string AdvancedConfigToolsText => ShowAdvancedConfigTools ? "بستن فهرست پیشرفته" : "نمایش فهرست و فیلترهای پیشرفته";
     public string StatusMessage { get => _statusMessage; private set => SetProperty(ref _statusMessage, value); }
     public string BackendTitle => $"{_tunnel.Capabilities.PlatformName} • {_tunnel.Capabilities.BackendName}";
@@ -388,6 +390,7 @@ public sealed class MainViewModel : ObservableObject
         {
             _store.EnsureCreated();
             Settings = await _store.LoadSettingsAsync();
+            ShowAdvancedConfigTools = !Settings.QuickMode;
             if (Settings.TestConcurrency <= 0)
                 Settings.TestConcurrency = DeviceInfo.Platform == DevicePlatform.WinUI ? 24 : DeviceInfo.Platform == DevicePlatform.Android ? 6 : 4;
             Settings.TestConcurrency = Math.Clamp(Settings.TestConcurrency, 1, DeviceInfo.Platform == DevicePlatform.WinUI ? 64 : 12);

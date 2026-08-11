@@ -51,7 +51,7 @@ bf572baa92c2c760a56fe96cbe1040e796f58989c126f7647f80022fda08922c  ./src/SaeParTu
 80e59263902d4fd06fd728da8215f997adf5a5d2c1fc04dc833a9217494e8140  ./src/SaeParTunnel.App/AppShell.xaml
 489de6f94fb52ebf4a3f077d19d519da133eaca6f39169836167ceb4f9b1a4f7  ./src/SaeParTunnel.App/AppShell.xaml.cs
 2726550c89770447360dd633fb8c5d8b6516141fb11d3bdcb54d00bf3e7c42b1  ./src/SaeParTunnel.App/MauiProgram.cs
-1a990c7915349c296a3bcc7d457031df376b57ca59cd21ec1d183a702cd41b9d  ./src/SaeParTunnel.App/Pages/ConfigsPage.xaml
+48e38d22a2c732e7b36f5d4a0f37d81dd9cd8ae1fe3e91c45a54cb3d5eb44eea  ./src/SaeParTunnel.App/Pages/ConfigsPage.xaml
 94123e05b1034417d364e5090902f88bbf9ed718a130bae224f0c825b2d7cbed  ./src/SaeParTunnel.App/Pages/ConfigsPage.xaml.cs
 4d5a099c17d73ccb425c57a5ec0ea32c888a7224b4b0bad3b6b74f70e780d3eb  ./src/SaeParTunnel.App/Pages/DashboardPage.xaml
 65122ef9b4d47e33cae2c3c99bfbc05ce050369c151a6493c92a8d68adeb01e8  ./src/SaeParTunnel.App/Pages/DashboardPage.xaml.cs
@@ -85,7 +85,7 @@ fb63fb259872c5194f4629a20a3a81465bcd805a8f5dab6654b015aeb5d6865c  ./src/SaeParTu
 815b18bb01d748d470640eb76280a0e845f66f8b22573be7c3d359381115fb5c  ./src/SaeParTunnel.App/Services/ObservableObject.cs
 ed2db62fcc4e85f09b59a5db5d5c20d1cd17ccbf84d810d6a3891f5f5ff53c66  ./src/SaeParTunnel.App/Services/ObservableRangeCollection.cs
 bc58946df9851ed3833e1b1067828681912c9351a14fb6cbdb48667356248d80  ./src/SaeParTunnel.App/Services/UnsupportedTunnelService.cs
-ec018442d35ea626b42dec1d34a4db58532334da03b7475604f69749c5d4acaf  ./src/SaeParTunnel.App/ViewModels/MainViewModel.cs
+a7bf8c99cd1559a0b828a842262bb2b3f0d9ba1293e536821c461edabb9ff102  ./src/SaeParTunnel.App/ViewModels/MainViewModel.cs
 c23c22288dddb300b8aef92b6e9e6224729f1a13c7841e48435b7abc0e866fd5  ./src/SaeParTunnel.Core/Abstractions/ITunnelService.cs
 05f1c41d2b4157a1b146c75331be637a1e4958ae4292b20f3cd24ea55bb6ff87  ./src/SaeParTunnel.Core/Models/AppSettings.cs
 df3f21f58002115e2553596823eafe7839141dd26e823f8dd95ba86b532f406d  ./src/SaeParTunnel.Core/Models/ConfigProfile.cs
