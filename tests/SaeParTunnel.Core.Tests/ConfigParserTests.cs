@@ -52,6 +52,16 @@ public sealed class ConfigParserTests
     }
 
     [Fact]
+    public void ParseUriProfileRecognizesSkipCertVerifyAlias()
+    {
+        var profile = ParseOk(
+            "vless://11111111-1111-1111-1111-111111111111@example.com:443" +
+            "?type=ws&security=tls&host=edge.example.com&skip-cert-verify=true");
+
+        Assert.True(profile.AllowInsecure);
+    }
+
+    [Fact]
     public void ParseVmessBase64PayloadMapsTransportAndTls()
     {
         var payload = JsonSerializer.Serialize(new
@@ -88,6 +98,25 @@ public sealed class ConfigParserTests
         Assert.Equal("chrome", profile.Fingerprint);
         Assert.Equal("h2,http/1.1", profile.Alpn);
         Assert.Equal("VMess WS", profile.Remark);
+    }
+
+    [Fact]
+    public void ParseVmessRecognizesSkipCertVerifyAlias()
+    {
+        var payload = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["add"] = "vmess.example.com",
+            ["port"] = "443",
+            ["id"] = "22222222-2222-2222-2222-222222222222",
+            ["aid"] = "0",
+            ["net"] = "ws",
+            ["tls"] = "tls",
+            ["skip-cert-verify"] = true
+        });
+
+        var profile = ParseOk("vmess://" + ToBase64Url(payload));
+
+        Assert.True(profile.AllowInsecure);
     }
 
     [Fact]

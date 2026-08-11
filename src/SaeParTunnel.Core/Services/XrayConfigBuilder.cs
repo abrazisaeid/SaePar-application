@@ -419,7 +419,10 @@ public sealed class XrayConfigBuilder
         {
             stream["tlsSettings"] = new
             {
-                serverName = NullIfEmpty(profile.Sni),
+                // Share links often omit SNI when the HTTP transport host already
+                // carries the certificate name. Xray otherwise falls back to the
+                // server address, which is commonly a CDN IP and fails validation.
+                serverName = FirstNonEmpty(profile.Sni, profile.Host, profile.Authority),
                 allowInsecure = profile.AllowInsecure,
                 fingerprint = NullIfEmpty(profile.Fingerprint),
                 alpn = ParseAlpn(profile.Alpn)
@@ -471,4 +474,7 @@ public sealed class XrayConfigBuilder
 
     private static string? NullIfEmpty(string value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private static string? FirstNonEmpty(params string[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 }

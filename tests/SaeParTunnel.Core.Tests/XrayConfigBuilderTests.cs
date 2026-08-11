@@ -43,6 +43,22 @@ public sealed class XrayConfigBuilderTests
     }
 
     [Fact]
+    public void BuildTlsWithoutExplicitSniUsesTransportHostForCertificateName()
+    {
+        var profile = VlessProfile(network: "websocket", security: "tls");
+        profile.Address = "203.0.113.10";
+        profile.Host = "edge.example.com";
+
+        using var doc = Build(profile);
+
+        var tls = doc.RootElement
+            .GetProperty("outbounds")[0]
+            .GetProperty("streamSettings")
+            .GetProperty("tlsSettings");
+        Assert.Equal("edge.example.com", tls.GetProperty("serverName").GetString());
+    }
+
+    [Fact]
     public void BuildWithWhitelistPlacesDirectFirstAndRoutesSelectedDomainsAndProcesses()
     {
         var settings = new AppSettings

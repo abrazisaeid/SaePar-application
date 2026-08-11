@@ -17,12 +17,15 @@ namespace SaeParTunnel.App.Platforms.Windows;
 
 public sealed class WindowsTunnelService : ITunnelService
 {
+    private const int MaxConcurrentXrayTests = 6;
     private static readonly ConcurrentDictionary<int, byte> ReservedPorts = new();
-    private static readonly string[] CurrentConnectionValidationEndpoints =
+    private static readonly SemaphoreSlim XrayInstallGate = new(1, 1);
+    private static readonly SemaphoreSlim XrayTestGate = new(MaxConcurrentXrayTests, MaxConcurrentXrayTests);
+    private static readonly string[] ProxyValidationEndpoints =
     {
         "https://cp.cloudflare.com/generate_204",
         "https://www.gstatic.com/generate_204",
-        "https://www.google.com/generate_204"
+        "https://www.msftconnecttest.com/connecttest.txt"
     };
     private readonly XrayConfigBuilder _builder;
     private readonly EndpointPrecheckService _precheck;
@@ -52,21 +55,33 @@ public sealed class WindowsTunnelService : ITunnelService
         _store.EnsureCreated();
         if (!string.IsNullOrWhiteSpace(settings.XrayPath) && File.Exists(settings.XrayPath)) return;
 
-        var localCandidates = new[]
+        await XrayInstallGate.WaitAsync(cancellationToken);
+        try
         {
-            Path.Combine(_store.RuntimePath, "xray.exe"),
-            Path.Combine(AppContext.BaseDirectory, "xray.exe")
-        };
-        var local = localCandidates.FirstOrDefault(File.Exists);
-        if (local is not null)
-        {
-            settings.XrayPath = local;
-            await _store.SaveSettingsAsync(settings);
-            return;
-        }
+            // Another test worker may have completed installation while this one
+            // was waiting. Always check again while holding the install gate.
+            if (!string.IsNullOrWhiteSpace(settings.XrayPath) && File.Exists(settings.XrayPath)) return;
 
-        settings.XrayPath = await InstallLatestXrayAsync(progress, cancellationToken);
-        await _store.SaveSettingsAsync(settings);
+            var localCandidates = new[]
+            {
+                Path.Combine(_store.RuntimePath, "xray.exe"),
+                Path.Combine(AppContext.BaseDirectory, "xray.exe")
+            };
+            var local = localCandidates.FirstOrDefault(File.Exists);
+            if (local is not null)
+            {
+                settings.XrayPath = local;
+                await _store.SaveSettingsAsync(settings);
+                return;
+            }
+
+            settings.XrayPath = await InstallLatestXrayAsync(progress, cancellationToken);
+            await _store.SaveSettingsAsync(settings);
+        }
+        finally
+        {
+            XrayInstallGate.Release();
+        }
     }
 
     public async Task<TestResult> TestAsync(ConfigProfile profile, AppSettings settings, CancellationToken cancellationToken = default)
@@ -81,36 +96,42 @@ public sealed class WindowsTunnelService : ITunnelService
             if (!pre.Success) return pre with { Level = ValidationLevel.FullProxy };
         }
 
-        var (socks, http) = ReservePortPair();
-        var temp = Path.Combine(_store.RuntimePath, $"test-{Guid.NewGuid():N}.json");
-        Process? proc = null;
-        var diagnostics = new ConcurrentQueue<string>();
+        await XrayTestGate.WaitAsync(cancellationToken);
         try
         {
-            var json = _builder.Build(profile, socks, http, testMode: true);
-            await File.WriteAllTextAsync(temp, json, cancellationToken);
-            proc = StartXray(settings.XrayPath, temp, diagnostics);
-            if (!await WaitForPortAsync(http, proc, settings.FastTestMode ? 3 : 5, cancellationToken))
-                return new TestResult(false, null, proc.HasExited ? "Xray کانفیگ را نپذیرفت. " + Tail(diagnostics) : "Proxy محلی آماده نشد. " + Tail(diagnostics), ValidationLevel.FullProxy);
+            var (socks, http) = ReservePortPair();
+            var temp = Path.Combine(_store.RuntimePath, $"test-{Guid.NewGuid():N}.json");
+            Process? proc = null;
+            var diagnostics = new ConcurrentQueue<string>();
+            try
+            {
+                var json = _builder.Build(profile, socks, http, testMode: true);
+                await File.WriteAllTextAsync(temp, json, cancellationToken);
+                proc = StartXray(settings.XrayPath, temp, diagnostics);
+                if (!await WaitForPortAsync(http, proc, settings.FastTestMode ? 3 : 5, cancellationToken))
+                    return new TestResult(false, null, proc.HasExited ? "Xray کانفیگ را نپذیرفت. " + Tail(diagnostics) : "Proxy محلی آماده نشد. " + Tail(diagnostics), ValidationLevel.FullProxy);
 
-            using var handler = new HttpClientHandler { Proxy = new WebProxy($"http://127.0.0.1:{http}"), UseProxy = true };
-            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(settings.FastTestMode ? 4 : 7) };
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("SaeParTunnel/2.0");
-            var sw = Stopwatch.StartNew();
-            using var response = await client.GetAsync("https://cp.cloudflare.com/generate_204", HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            sw.Stop();
-            if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NoContent)
-                return new TestResult(true, (int)sw.ElapsedMilliseconds, "اتصال واقعی از Proxy برقرار شد.", ValidationLevel.FullProxy);
-            return new TestResult(false, null, $"HTTP {(int)response.StatusCode} از تست Proxy. " + Tail(diagnostics), ValidationLevel.FullProxy);
+                var validation = await ProbeProxyEndpointsAsync(
+                    http,
+                    TimeSpan.FromSeconds(settings.FastTestMode ? 4 : 7),
+                    cancellationToken);
+                return validation.Success
+                    ? validation with { Message = "اتصال واقعی از Proxy برقرار شد • " + validation.Message }
+                    : validation with { Message = validation.Message + " • " + Tail(diagnostics) };
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { return new TestResult(false, null, ex.Message + " " + Tail(diagnostics), ValidationLevel.FullProxy); }
+            finally
+            {
+                try { if (proc is { HasExited: false }) { proc.Kill(true); await proc.WaitForExitAsync(CancellationToken.None); } } catch { }
+                proc?.Dispose();
+                try { File.Delete(temp); } catch { }
+                ReleasePortPair(socks, http);
+            }
         }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { return new TestResult(false, null, ex.Message + " " + Tail(diagnostics), ValidationLevel.FullProxy); }
         finally
         {
-            try { if (proc is { HasExited: false }) { proc.Kill(true); await proc.WaitForExitAsync(CancellationToken.None); } } catch { }
-            proc?.Dispose();
-            try { File.Delete(temp); } catch { }
-            ReleasePortPair(socks, http);
+            XrayTestGate.Release();
         }
     }
 
@@ -119,25 +140,55 @@ public sealed class WindowsTunnelService : ITunnelService
         if (!IsConnected)
             return new TestResult(false, null, "Xray محلی فعال نیست.", ValidationLevel.None);
 
-        var timeout = TimeSpan.FromSeconds(settings.FastTestMode ? 3 : 5);
-        var pending = CurrentConnectionValidationEndpoints
-            .Select(endpoint => ProbeCurrentConnectionEndpointAsync(endpoint, settings.HttpPort, timeout, cancellationToken))
+        return await ProbeProxyEndpointsAsync(
+            settings.HttpPort,
+            TimeSpan.FromSeconds(settings.FastTestMode ? 3 : 5),
+            cancellationToken);
+    }
+
+    private static async Task<TestResult> ProbeProxyEndpointsAsync(
+        int httpPort,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var pending = ProxyValidationEndpoints
+            .Select(endpoint => ProbeProxyEndpointAsync(endpoint, httpPort, timeout, probeCts.Token))
             .ToList();
         var errors = new List<string>();
+        TestResult? successful = null;
 
-        while (pending.Count > 0)
+        try
         {
-            var completed = await Task.WhenAny(pending);
-            pending.Remove(completed);
-            var result = await completed;
-            if (result.Success) return result;
-            errors.Add(result.Message);
+            while (pending.Count > 0)
+            {
+                var completed = await Task.WhenAny(pending);
+                pending.Remove(completed);
+                var result = await completed;
+                if (result.Success)
+                {
+                    successful = result;
+                    break;
+                }
+
+                errors.Add(result.Message);
+            }
+        }
+        finally
+        {
+            if (pending.Count > 0)
+            {
+                probeCts.Cancel();
+                try { await Task.WhenAll(pending); }
+                catch (OperationCanceledException) { }
+            }
         }
 
+        if (successful is not null) return successful;
         return new TestResult(false, null, "تست اینترنت: " + string.Join(" | ", errors), ValidationLevel.FullProxy);
     }
 
-    private static async Task<TestResult> ProbeCurrentConnectionEndpointAsync(
+    private static async Task<TestResult> ProbeProxyEndpointAsync(
         string endpoint,
         int httpPort,
         TimeSpan timeout,
@@ -163,7 +214,7 @@ public sealed class WindowsTunnelService : ITunnelService
             sw.Stop();
 
             var code = (int)response.StatusCode;
-            return code >= 200 && code < 500
+            return code >= 200 && code < 500 && code != (int)HttpStatusCode.ProxyAuthenticationRequired
                 ? new TestResult(true, (int)sw.ElapsedMilliseconds, $"{host}=HTTP {code} • {sw.ElapsedMilliseconds:N0} ms", ValidationLevel.FullProxy)
                 : new TestResult(false, null, $"{host}=HTTP {code}", ValidationLevel.FullProxy);
         }
@@ -449,7 +500,15 @@ public sealed class WindowsTunnelService : ITunnelService
         throw new InvalidOperationException("پورت آزاد برای تست پیدا نشد؛ concurrency را کم کنید.");
     }
     private static void ReleasePortPair(int s, int h) { ReservedPorts.TryRemove(s, out _); ReservedPorts.TryRemove(h, out _); }
-    private static string Tail(ConcurrentQueue<string> q) => string.Join(" | ", q.TakeLast(3).Select(x => x.Length > 160 ? x[..160] + "…" : x));
+    private static string Tail(ConcurrentQueue<string> q) =>
+        string.Join(" | ", q.TakeLast(4).Select(CompactDiagnosticLine));
+
+    private static string CompactDiagnosticLine(string line)
+    {
+        const int maxLength = 260;
+        if (line.Length <= maxLength) return line;
+        return line[..80] + "…" + line[^170..];
+    }
 
     private const string InternetSettings = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
     private static void EnableSystemProxy(AppSettings settings)

@@ -88,7 +88,7 @@ public sealed class ConfigParser
             Encryption = Get(query, "encryption", "none"),
             Flow = Get(query, "flow"),
             Network = NormalizeNetwork(Get(query, "type", "raw")),
-            Security = string.IsNullOrWhiteSpace(security) ? "none" : security.ToLowerInvariant(),
+            Security = string.IsNullOrWhiteSpace(security) ? "none" : security.Trim().ToLowerInvariant(),
             Sni = Get(query, "sni"),
             Host = Get(query, "host"),
             Path = Get(query, "path"),
@@ -101,7 +101,9 @@ public sealed class ConfigParser
             HeaderType = Get(query, "headerType", "none"),
             Mode = Get(query, "mode"),
             Alpn = Get(query, "alpn"),
-            AllowInsecure = IsTrue(Get(query, "allowInsecure", Get(query, "insecure"))),
+            AllowInsecure = IsTrue(Get(query, "allowInsecure")) ||
+                IsTrue(Get(query, "insecure")) ||
+                IsTrue(Get(query, "skip-cert-verify")),
             Remark = Uri.UnescapeDataString(uri.Fragment.TrimStart('#'))
         };
 
@@ -134,14 +136,16 @@ public sealed class ConfigParser
             AlterId = I("aid"),
             Encryption = S("scy", "auto"),
             Network = NormalizeNetwork(S("net", "raw")),
-            Security = S("tls", "none").ToLowerInvariant(),
+            Security = string.IsNullOrWhiteSpace(S("tls")) ? "none" : S("tls").Trim().ToLowerInvariant(),
             Sni = S("sni"),
             Host = S("host"),
             Path = S("path"),
             HeaderType = S("type", "none"),
             Fingerprint = S("fp"),
             Alpn = S("alpn"),
-            AllowInsecure = IsTrue(S("allowInsecure", S("insecure"))),
+            AllowInsecure = IsTrue(S("allowInsecure")) ||
+                IsTrue(S("insecure")) ||
+                IsTrue(S("skip-cert-verify")),
             Remark = S("ps")
         };
     }
