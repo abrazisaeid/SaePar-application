@@ -59,6 +59,21 @@ public sealed class XrayConfigBuilderTests
     }
 
     [Fact]
+    public void BuildNormalModeRoutesPrivateNetworksDirect()
+    {
+        using var doc = Build(VlessProfile());
+        var privateRule = doc.RootElement
+            .GetProperty("routing")
+            .GetProperty("rules")
+            .EnumerateArray()
+            .Single(x => x.GetProperty("ruleTag").GetString() == "private-networks");
+
+        Assert.Equal("field", privateRule.GetProperty("type").GetString());
+        Assert.Equal("direct", privateRule.GetProperty("outboundTag").GetString());
+        Assert.Contains("geoip:private", Strings(privateRule.GetProperty("ip")));
+    }
+
+    [Fact]
     public void BuildWithWhitelistPlacesDirectFirstAndRoutesSelectedDomainsAndProcesses()
     {
         var settings = new AppSettings
@@ -78,9 +93,11 @@ public sealed class XrayConfigBuilderTests
         Assert.Equal("proxy", root.GetProperty("outbounds")[1].GetProperty("tag").GetString());
 
         var rules = root.GetProperty("routing").GetProperty("rules").EnumerateArray().ToArray();
+        var privateRule = rules.Single(x => x.GetProperty("ruleTag").GetString() == "private-networks");
         var processRule = rules.Single(x => x.GetProperty("ruleTag").GetString() == "whitelist-applications");
         var domainRule = rules.Single(x => x.GetProperty("ruleTag").GetString() == "whitelist-websites");
 
+        Assert.Equal("direct", privateRule.GetProperty("outboundTag").GetString());
         Assert.Equal("proxy", processRule.GetProperty("outboundTag").GetString());
         Assert.Contains("C:/Apps/Telegram/telegram.exe", Strings(processRule.GetProperty("process")));
         Assert.Equal("proxy", domainRule.GetProperty("outboundTag").GetString());

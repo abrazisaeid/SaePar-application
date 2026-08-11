@@ -54,8 +54,12 @@ public sealed class XrayConfigBuilder
             ["outbounds"] = outbounds
         };
 
-        if (whitelistEnabled && settings is not null)
-            root["routing"] = BuildWhitelistRouting(settings);
+        if (!testMode)
+        {
+            root["routing"] = whitelistEnabled && settings is not null
+                ? BuildWhitelistRouting(settings)
+                : BuildPrivateNetworkRouting();
+        }
 
         return JsonSerializer.Serialize(root, JsonOptions);
     }
@@ -222,7 +226,7 @@ public sealed class XrayConfigBuilder
 
     private static object BuildWhitelistRouting(AppSettings settings)
     {
-        var rules = new List<object>();
+        var rules = new List<object> { BuildPrivateNetworkRule() };
 
         var processes = settings.WhitelistApplications
             .Where(x => x is not null && !string.IsNullOrWhiteSpace(x.ExecutablePath))
@@ -264,6 +268,20 @@ public sealed class XrayConfigBuilder
             rules
         };
     }
+
+    private static object BuildPrivateNetworkRouting() => new
+    {
+        domainStrategy = "AsIs",
+        rules = new[] { BuildPrivateNetworkRule() }
+    };
+
+    private static object BuildPrivateNetworkRule() => new
+    {
+        type = "field",
+        ip = new[] { "geoip:private" },
+        outboundTag = "direct",
+        ruleTag = "private-networks"
+    };
 
     private static string? NormalizeRoutingDomain(string value)
     {

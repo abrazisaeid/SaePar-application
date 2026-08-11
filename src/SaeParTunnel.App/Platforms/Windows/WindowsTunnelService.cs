@@ -511,6 +511,35 @@ public sealed class WindowsTunnelService : ITunnelService
     }
 
     private const string InternetSettings = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+    private static readonly string[] RequiredSystemProxyBypass =
+    {
+        "<local>",
+        "localhost",
+        "loopback",
+        "127.*",
+        "[::1]",
+        "10.*",
+        "169.254.*",
+        "172.16.*",
+        "172.17.*",
+        "172.18.*",
+        "172.19.*",
+        "172.20.*",
+        "172.21.*",
+        "172.22.*",
+        "172.23.*",
+        "172.24.*",
+        "172.25.*",
+        "172.26.*",
+        "172.27.*",
+        "172.28.*",
+        "172.29.*",
+        "172.30.*",
+        "172.31.*",
+        "192.168.*",
+        "*.local"
+    };
+
     private static void EnableSystemProxy(AppSettings settings)
     {
         using var key = Registry.CurrentUser.OpenSubKey(InternetSettings, true) ?? throw new InvalidOperationException("Internet Settings قابل دسترس نیست.");
@@ -522,9 +551,18 @@ public sealed class WindowsTunnelService : ITunnelService
         }
         key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
         key.SetValue("ProxyServer", $"http=127.0.0.1:{settings.HttpPort};https=127.0.0.1:{settings.HttpPort}");
-        key.SetValue("ProxyOverride", "<local>");
+        key.SetValue("ProxyOverride", BuildSystemProxyBypass(settings.PreviousProxyOverride), RegistryValueKind.String);
         settings.ProxyWasManaged = true; RefreshInternetOptions();
     }
+
+    private static string BuildSystemProxyBypass(string? previousOverride) =>
+        string.Join(';', RequiredSystemProxyBypass
+            .Concat((previousOverride ?? string.Empty).Split(
+                new[] { ';', ',' },
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Where(value => !string.Equals(value, "<-loopback>", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase));
+
     private static void RestoreSystemProxy(AppSettings settings)
     {
         using var key = Registry.CurrentUser.OpenSubKey(InternetSettings, true); if (key is null) return;
