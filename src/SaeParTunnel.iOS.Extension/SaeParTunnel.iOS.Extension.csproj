@@ -11,6 +11,9 @@
     <ApplicationDisplayVersion>2.0.21</ApplicationDisplayVersion>
     <ApplicationVersion>41</ApplicationVersion>
     <CodesignEntitlements>Entitlements.plist</CodesignEntitlements>
+    <CodesignKey Condition="'$(IosSigningKey)' != ''">$(IosSigningKey)</CodesignKey>
+    <CodesignKeychain Condition="'$(IosSigningKeychain)' != ''">$(IosSigningKeychain)</CodesignKeychain>
+    <CodesignProvision Condition="'$(IosExtensionProvisioningProfile)' != ''">$(IosExtensionProvisioningProfile)</CodesignProvision>
   </PropertyGroup>
 
   <ItemGroup>

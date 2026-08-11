@@ -1,51 +1,70 @@
 # Release Process
 
-This project publishes downloadable assets through GitHub Releases:
+GitHub Releases can contain these downloadable assets:
 
 - `SaeParTunnel-<version>-android.apk`
 - `SaeParTunnel-<version>-windows-x64.zip`
+- `SaeParTunnel-<version>-ios.ipa` when Apple signing is configured
 - `SHA256SUMS.txt`
 
-Do not commit release binaries or Android signing keys to the repository.
+Do not commit release binaries, certificates, provisioning profiles, keystores or passwords to the repository.
 
-## Local Packaging
+## Android and Windows local packaging
 
-To create local release assets with a local Android signing key:
+Create signed Android and Windows assets with a local Android signing key:
 
 ```powershell
 .\scripts\package-release.ps1 -GenerateLocalAndroidKeyStore
 ```
 
-The script writes assets to:
-
-```text
-artifacts\release\v<version>\
-```
-
-When `-GenerateLocalAndroidKeyStore` is used, the keystore and password are stored outside the repository:
+Assets are written to `artifacts\release\v<version>\`. The generated keystore and password stay outside the repository:
 
 ```text
 %USERPROFILE%\.saepar-tunnel\android-release.keystore
 %USERPROFILE%\.saepar-tunnel\android-release-password.txt
 ```
 
-Back up both files. Android app updates must be signed with the same key.
+Back up both files. Every Android update must be signed with the same key.
 
-## Release Quality Gate
+## iOS local packaging
 
-Before publishing the downloadable assets, run these checks:
+An installable IPA must be built on macOS with Xcode and Apple signing material. Create two explicit App IDs and provisioning profiles with the Network Extensions / Packet Tunnel capability:
 
-- `dotnet test tests\SaeParTunnel.Core.Tests\SaeParTunnel.Core.Tests.csproj -m:1`
-- Windows debug or release build for `net9.0-windows10.0.19041.0`
-- Android debug or release build for `net9.0-android`
-- Open the app and verify the main screen shows `Disconnected` until the tunnel internet test passes.
-- In Configs, run guided health testing and confirm the 5-healthy checkpoint prompt appears before continuing.
-- Confirm the best profile card, Connect, Disconnect, Settings and Diagnostics pages all reflect the same connection state.
-- Copy the Diagnostics report once and attach it to the release notes only when troubleshooting context is needed.
+```text
+com.saepar.tunnel
+com.saepar.tunnel.packet-tunnel
+```
 
-## GitHub Release Workflow
+Install the certificate and profiles on the Mac, then run:
 
-Before pushing a release tag, add these repository secrets:
+```bash
+export IOS_SIGNING_KEY='Apple Distribution: Example Company (TEAMID)'
+export IOS_APP_PROVISIONING_PROFILE='APP_PROFILE_UUID'
+export IOS_EXTENSION_PROVISIONING_PROFILE='EXTENSION_PROFILE_UUID'
+./scripts/package-ios.sh v2.0.21
+```
+
+Set `IOS_SIGNING_KEYCHAIN` when the certificate is in a custom keychain. The script restores the pinned libXray framework, builds for `ios-arm64`, creates the IPA and verifies its archive, bundle IDs, Packet Tunnel extension, embedded profiles and code signature.
+
+For a directly downloadable GitHub IPA, use Ad Hoc profiles. It will only install on devices whose UDIDs are included in those profiles. App Store profiles are intended for App Store Connect/TestFlight and do not make a GitHub IPA generally sideloadable.
+
+## Release quality gate
+
+Before publishing assets:
+
+- Run `dotnet test tests\SaeParTunnel.Core.Tests\SaeParTunnel.Core.Tests.csproj -m:1`.
+- Build Windows for `net9.0-windows10.0.19041.0`.
+- Build Android for `net9.0-android`.
+- Build the iOS app and Packet Tunnel extension on macOS for an iOS simulator.
+- On a physical iPhone, approve VPN permission and verify the UI remains disconnected until the tunnel internet test succeeds.
+- Confirm public web traffic uses the selected profile while local IPv4/IPv6 services remain reachable.
+- Verify Connect becomes disabled and Disconnect becomes prominent only after validation succeeds.
+- Run guided config testing and confirm the healthy-profile checkpoints behave at 5, 10 and the selected final count.
+- Confirm Dashboard, Configs, Settings and Diagnostics show one consistent connection state.
+
+## GitHub secrets
+
+Android and Windows release jobs require:
 
 ```text
 ANDROID_KEYSTORE_BASE64
@@ -54,13 +73,34 @@ ANDROID_KEYSTORE_PASSWORD
 ANDROID_KEY_PASSWORD
 ```
 
-To convert the local keystore to a GitHub secret value:
+Create the Android keystore secret value on Windows:
 
 ```powershell
 [Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\.saepar-tunnel\android-release.keystore")) | Set-Clipboard
 ```
 
-Create and publish a release:
+Signed iOS packaging is enabled when all four Apple secrets exist:
+
+```text
+IOS_DISTRIBUTION_CERTIFICATE_BASE64
+IOS_DISTRIBUTION_CERTIFICATE_PASSWORD
+IOS_APP_PROVISIONING_PROFILE_BASE64
+IOS_EXTENSION_PROVISIONING_PROFILE_BASE64
+```
+
+Generate each base64 value on macOS without line breaks:
+
+```bash
+base64 < distribution.p12 | tr -d '\n' | pbcopy
+base64 < SaeParApp.mobileprovision | tr -d '\n' | pbcopy
+base64 < SaeParPacketTunnel.mobileprovision | tr -d '\n' | pbcopy
+```
+
+The workflow checks both bundle IDs, the Packet Tunnel entitlement and the Apple team before signing. If none of the Apple secrets exist, the simulator quality gate still runs and the release is published without an IPA. A partially configured Apple signing set fails the release instead of silently publishing an incomplete package.
+
+## Publish a release
+
+Update the app and extension versions first, then create and push the matching tag:
 
 ```powershell
 git tag -a v2.0.21 -m "SaePar Tunnel v2.0.21"
@@ -68,4 +108,4 @@ git push origin main
 git push origin v2.0.21
 ```
 
-The `Release` workflow builds the APK and Windows ZIP, then uploads them to the GitHub Release for that tag.
+The `Release` workflow builds Android and Windows on a Windows runner, validates iOS on a macOS runner, optionally creates the signed IPA, regenerates one checksum manifest and then creates or updates the GitHub Release.

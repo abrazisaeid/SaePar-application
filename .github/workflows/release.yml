@@ -22,15 +22,36 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
   DOTNET_NOLOGO: "1"
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
-  package:
-    name: Build Release Assets
+  windows-android:
+    name: Build Android and Windows
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Resolve release tag
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = if ($env:EVENT_NAME -eq 'workflow_dispatch') { $env:DISPATCH_TAG } else { $env:REF_NAME }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Invalid release tag: $tag"
+          }
+
+          [xml]$project = Get-Content -LiteralPath '.\src\SaeParTunnel.App\SaeParTunnel.App.csproj' -Raw
+          $projectVersion = $project.Project.PropertyGroup.ApplicationDisplayVersion | Select-Object -First 1
+          if ($tag.Substring(1) -ne $projectVersion) {
+            throw "Release tag $tag does not match project version $projectVersion."
+          }
+
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
@@ -76,27 +97,294 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          $tag = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.tag }}' } else { '${{ github.ref_name }}' }
           .\scripts\package-release.ps1 `
-            -Version $tag `
+            -Version $env:RELEASE_TAG `
             -AndroidKeyStore $env:ANDROID_KEYSTORE `
             -AndroidSigningKeyAlias $env:ANDROID_KEY_ALIAS `
             -AndroidSigningKeyPass $env:ANDROID_KEY_PASSWORD `
             -AndroidSigningStorePass $env:ANDROID_KEYSTORE_PASSWORD
 
-      - name: Create or Update GitHub Release
-        shell: pwsh
+      - name: Upload Android and Windows assets
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-windows-android
+          path: artifacts/release/${{ env.RELEASE_TAG }}/*
+          if-no-files-found: error
+
+  ios:
+    name: Build iOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Resolve release tag
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            release_tag="$DISPATCH_TAG"
+          else
+            release_tag="$REF_NAME"
+          fi
+
+          if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $release_tag" >&2
+            exit 1
+          fi
+
+          project_version="$(sed -n 's|.*<ApplicationDisplayVersion>\([^<]*\)</ApplicationDisplayVersion>.*|\1|p' src/SaeParTunnel.App/SaeParTunnel.App.csproj | head -n 1)"
+          if [[ "${release_tag#v}" != "$project_version" ]]; then
+            echo "Release tag $release_tag does not match project version $project_version." >&2
+            exit 1
+          fi
+
+          echo "RELEASE_TAG=$release_tag" >> "$GITHUB_ENV"
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Cache libXray Apple framework
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/saepar/libxray/v26.7.28/libxray-apple-cgo.zip
+          key: libxray-apple-v26.7.28-07f7ed7697277930
+
+      - name: Install MAUI workloads
+        shell: bash
+        run: dotnet workload install maui ios --skip-manifest-update
+
+      - name: Prepare libXray
+        shell: bash
+        run: ./native/ios/fetch-libxray.sh
+
+      - name: Build iOS simulator quality gate
+        shell: bash
+        run: |
+          simulator_rid="iossimulator-x64"
+          if [[ "$(uname -m)" == "arm64" ]]; then
+            simulator_rid="iossimulator-arm64"
+          fi
+
+          dotnet build src/SaeParTunnel.App/SaeParTunnel.App.csproj \
+            -f net9.0-ios \
+            -c Release \
+            -r "$simulator_rid"
+
+      - name: Detect iOS signing configuration
+        id: signing
+        shell: bash
+        env:
+          IOS_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
+          IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          IOS_APP_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_PROVISIONING_PROFILE_BASE64 }}
+          IOS_EXTENSION_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_EXTENSION_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          required=(
+            IOS_DISTRIBUTION_CERTIFICATE_BASE64
+            IOS_DISTRIBUTION_CERTIFICATE_PASSWORD
+            IOS_APP_PROVISIONING_PROFILE_BASE64
+            IOS_EXTENSION_PROVISIONING_PROFILE_BASE64
+          )
+          configured=0
+          missing=()
+
+          for variable_name in "${required[@]}"; do
+            if [[ -n "${!variable_name:-}" ]]; then
+              configured=$((configured + 1))
+            else
+              missing+=("$variable_name")
+            fi
+          done
+
+          if [[ "$configured" -eq 0 ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Apple signing secrets are not configured; the signed IPA will be skipped."
+          elif [[ "$configured" -ne "${#required[@]}" ]]; then
+            echo "Incomplete Apple signing configuration. Missing: ${missing[*]}" >&2
+            exit 1
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Apple signing certificate and profiles
+        if: steps.signing.outputs.configured == 'true'
+        shell: bash
+        env:
+          IOS_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
+          IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          IOS_APP_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_PROVISIONING_PROFILE_BASE64 }}
+          IOS_EXTENSION_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_EXTENSION_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          certificate_path="$RUNNER_TEMP/saepar-distribution.p12"
+          app_profile_path="$RUNNER_TEMP/saepar-app.mobileprovision"
+          extension_profile_path="$RUNNER_TEMP/saepar-extension.mobileprovision"
+          keychain_path="$RUNNER_TEMP/saepar-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+
+          echo "IOS_SIGNING_KEYCHAIN_PATH=$keychain_path" >> "$GITHUB_ENV"
+
+          printf '%s' "$IOS_DISTRIBUTION_CERTIFICATE_BASE64" | openssl base64 -d -A > "$certificate_path"
+          printf '%s' "$IOS_APP_PROVISIONING_PROFILE_BASE64" | openssl base64 -d -A > "$app_profile_path"
+          printf '%s' "$IOS_EXTENSION_PROVISIONING_PROFILE_BASE64" | openssl base64 -d -A > "$extension_profile_path"
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$keychain_path"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s -k "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" "$HOME/Library/Keychains/login.keychain-db"
+
+          install_profile() {
+            local source_path="$1"
+            local expected_identifier="$2"
+            local output_name="$3"
+            local plist_path="${source_path}.plist"
+            local profile_uuid
+            local application_identifier
+            local network_extension
+            local team_identifier
+            local identifier_prefix
+
+            security cms -D -i "$source_path" > "$plist_path"
+            profile_uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$plist_path")"
+            application_identifier="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$plist_path")"
+            network_extension="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.networking.networkextension:0' "$plist_path")"
+            team_identifier="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.team-identifier' "$plist_path")"
+            identifier_prefix="$(/usr/libexec/PlistBuddy -c 'Print :ApplicationIdentifierPrefix:0' "$plist_path")"
+
+            if [[ "$application_identifier" != "$identifier_prefix.$expected_identifier" ]]; then
+              echo "Provisioning profile $profile_uuid targets $application_identifier, expected $expected_identifier." >&2
+              exit 1
+            fi
+            if [[ "$network_extension" != "packet-tunnel-provider" ]]; then
+              echo "Provisioning profile $profile_uuid does not allow packet-tunnel-provider." >&2
+              exit 1
+            fi
+            if [[ -n "${signing_team:-}" && "$team_identifier" != "$signing_team" ]]; then
+              echo "The app and extension provisioning profiles belong to different Apple teams." >&2
+              exit 1
+            fi
+            signing_team="$team_identifier"
+
+            mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+            cp "$source_path" "$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision"
+            echo "$output_name=$profile_uuid" >> "$GITHUB_ENV"
+          }
+
+          install_profile "$app_profile_path" "com.saepar.tunnel" "IOS_APP_PROVISIONING_PROFILE"
+          install_profile "$extension_profile_path" "com.saepar.tunnel.packet-tunnel" "IOS_EXTENSION_PROVISIONING_PROFILE"
+
+          signing_identities="$(security find-identity -v -p codesigning "$keychain_path")"
+          signing_key="$(printf '%s\n' "$signing_identities" | sed -n 's/.*"\(.*\)".*/\1/p' | head -n 1)"
+          if [[ -z "$signing_key" ]]; then
+            echo "The imported certificate does not contain a valid code-signing identity." >&2
+            exit 1
+          fi
+
+          echo "IOS_SIGNING_KEY=$signing_key" >> "$GITHUB_ENV"
+          echo "IOS_SIGNING_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+
+      - name: Package signed IPA
+        if: steps.signing.outputs.configured == 'true'
+        shell: bash
+        run: ./scripts/package-ios.sh "$RELEASE_TAG"
+
+      - name: Upload iOS asset
+        if: steps.signing.outputs.configured == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-ios
+          path: artifacts/release/${{ env.RELEASE_TAG }}/*.ipa
+          if-no-files-found: error
+
+      - name: Clean Apple signing material
+        if: always() && steps.signing.outputs.configured == 'true'
+        shell: bash
+        run: |
+          if [[ -n "${IOS_APP_PROVISIONING_PROFILE:-}" ]]; then
+            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$IOS_APP_PROVISIONING_PROFILE.mobileprovision"
+          fi
+          if [[ -n "${IOS_EXTENSION_PROVISIONING_PROFILE:-}" ]]; then
+            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$IOS_EXTENSION_PROVISIONING_PROFILE.mobileprovision"
+          fi
+          if [[ -n "${IOS_SIGNING_KEYCHAIN_PATH:-}" ]]; then
+            security delete-keychain "$IOS_SIGNING_KEYCHAIN_PATH" || true
+          fi
+          rm -f "$RUNNER_TEMP/saepar-distribution.p12" \
+            "$RUNNER_TEMP/saepar-app.mobileprovision" \
+            "$RUNNER_TEMP/saepar-app.mobileprovision.plist" \
+            "$RUNNER_TEMP/saepar-extension.mobileprovision" \
+            "$RUNNER_TEMP/saepar-extension.mobileprovision.plist"
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - windows-android
+      - ios
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release tag
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "RELEASE_TAG=$DISPATCH_TAG" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TAG=$REF_NAME" >> "$GITHUB_ENV"
+          fi
+
+      - name: Download release assets
+        uses: actions/download-artifact@v7
+        with:
+          pattern: release-*
+          path: staging
+          merge-multiple: true
+
+      - name: Prepare checksums
+        shell: bash
+        run: |
+          release_root="artifacts/release/$RELEASE_TAG"
+          mkdir -p "$release_root"
+          find staging -maxdepth 1 -type f -exec cp {} "$release_root/" \;
+          rm -f "$release_root/SHA256SUMS.txt"
+
+          test -f "$release_root/SaeParTunnel-${RELEASE_TAG#v}-android.apk"
+          test -f "$release_root/SaeParTunnel-${RELEASE_TAG#v}-windows-x64.zip"
+
+          (
+            cd "$release_root"
+            for asset in *; do
+              if [[ -f "$asset" && "$asset" != "SHA256SUMS.txt" ]]; then
+                sha256sum "$asset"
+              fi
+            done | sort -k 2 > SHA256SUMS.txt
+          )
+
+      - name: Create or update GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.tag }}' } else { '${{ github.ref_name }}' }
-          $assets = Get-ChildItem -LiteralPath ".\artifacts\release\$tag" -File | ForEach-Object { $_.FullName }
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $assets --clobber
-          } else {
-            gh release create $tag $assets `
-              --title "SaePar Tunnel $tag" `
-              --generate-notes `
+          assets=("artifacts/release/$RELEASE_TAG"/*)
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" \
+              --title "SaePar Tunnel $RELEASE_TAG" \
+              --generate-notes \
               --target "${{ github.sha }}"
-          }

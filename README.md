@@ -40,12 +40,12 @@ Real Xray process backend is present: download/prepare Xray, full proxy test, co
 The MAUI application itself, GitHub/config management, filters, persistence and endpoint tests are present. **Android now includes a real device VPN backend.** The app bundles the official XTLS/libXray Android AAR and connects Android `VpnService` TUN traffic to the selected Xray outbound. Android tests also use libXray for a real full-proxy probe.
 
 ### iOS
-The shared app is present. A real VPN requires a NetworkExtension Packet Tunnel provider + libXray Apple framework and a Mac/Xcode signing environment.
+The iOS 15+ app includes a real `NEPacketTunnelProvider`, the pinned official XTLS/libXray Apple framework, full-device routing, website routing and LAN bypass. The app waits for an internet validation through the tunnel before it reports a successful connection. Building an installable IPA requires macOS, Xcode, an Apple signing certificate and separate Network Extension provisioning profiles for the app and extension.
 
-## Next native milestone
+## Next quality milestone
 1. Device-test and harden the Android VPN backend across vendors/Android versions.
 2. Add Android runtime traffic counters and connection diagnostics.
-3. Add the iOS Packet Tunnel extension on a Mac with NetworkExtension signing.
+3. Exercise the iOS Packet Tunnel on physical devices and distribute production builds through TestFlight/App Store.
 
 ## Previous migration fixes retained
 - .NET 9 for Visual Studio 2022

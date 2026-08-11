@@ -1,35 +1,43 @@
-# Validation — Preview 13
+# Validation
 
-Static checks performed in the generation environment:
+Validation status for SaePar Tunnel 2.0.21:
 
-- Project/Application version updated to 2.0.13 / 32.
-- All XML, XAML and csproj files parse as XML.
-- Modified Android/shared C# files passed lexical bracket-balance checks.
-- Official libXray Android AAR is bundled and contains `classes.jar` plus
-  `libgojni.so` for arm64-v8a, armeabi-v7a, x86 and x86_64.
-- Bundled AAR SHA-256 is
-  `4708a361a74f7e955635dbe3661cefb459bdc867423c3b1826a2c5a6ea4ac77d`.
-- `SaeParXrayBridge.java` was compiled with `javac` against the actual upstream
-  libXray `classes.jar` (using minimal Android API stubs) to verify Java syntax
-  and the `DialerController`/`LibXray` interface calls.
-- Android manifest declares VPN foreground-service permissions, BIND_VPN_SERVICE,
-  VpnService intent filter, Android 14+ specialUse foreground-service type/permission, runtime foreground type, and an explicit Always-on VPN opt-out.
-- Android real-proxy test request uses libXray API v1 `ping` and a temporary
-  loopback SOCKS inbound.
-- Android connection uses libXray API v1 `runXrayFromJson` and the Xray TUN
-  inbound with a VpnService-owned descriptor.
+## Automated checks
 
-Limitation of this validation environment:
+- Core test suite: 23 passed, 0 failed.
+- iOS binding Release build for `iossimulator-x64`: passed with 0 errors.
+- Packet Tunnel extension Release build for `iossimulator-x64`: passed with 0 errors.
+- Full MAUI iOS Release build for `iossimulator-x64`: passed with 0 errors.
+- Full MAUI iOS Release publish for `ios-arm64` with code signing disabled: passed with 0 errors.
+- Android Debug build: passed with 0 errors.
+- Windows Debug `win-x64` build: passed with 0 errors.
+- App and extension signing-property evaluation confirms separate provisioning profiles and a shared identity/keychain.
+- All iOS shell scripts pass `bash -n` syntax validation.
+- GitHub Actions workflow files parse as YAML and all referenced official action major tags exist.
+- Modified files pass `git diff --check`.
 
-- The container does not have `dotnet` or the .NET Android/MAUI workload, so an
-  APK/AAB could not be compiled here. Build and runtime validation must be done
-  in Visual Studio 2022 on the user's Android device. The first device run is
-  therefore the integration validation for generated Java binding names,
-  manifest merge and vendor-specific VPN behavior.
+The existing MAUI/XAML and network vulnerability-feed warnings remain non-fatal. The vulnerability-feed warning occurs when `api.nuget.org` is unavailable and does not indicate a discovered vulnerable package.
 
-## Preview 20 Android TUN fd validation
-- Rebuilt `SaeParXrayBridge.aar` from updated Java source against the actual bundled libXray `classes.jar` using minimal Android API stubs.
-- Verified the AAR exports `initialize`, `attachTun`, `detachTun`, `invoke`, and compatibility `getStableTunFd` methods.
-- Android service injects the live `ParcelFileDescriptor.Fd` into Xray root JSON `env["xray.tun.fd"]` immediately before `runXrayFromJson`.
-- XML/XAML/csproj parse validation passed.
-- Full .NET MAUI Android compilation still requires the user's Visual Studio/.NET Android workload; this container has no `dotnet` SDK.
+## Native artifact
+
+The iOS build restores the official XTLS/libXray `v26.7.28` Apple XCFramework. `fetch-libxray.sh` pins and checks the archive with SHA-256:
+
+```text
+07f7ed7697277930e1c517755855950f594f41435b0dfc5917a66eea6278aeb9
+```
+
+The XCFramework contains device and simulator slices used by the successful local compile checks.
+
+## Physical-device and distribution gates
+
+These checks require macOS, Xcode, an Apple Developer team and a physical iPhone:
+
+- Sign the host app and Packet Tunnel extension with separate matching provisioning profiles.
+- Run `scripts/package-ios.sh` and verify the resulting IPA passes its embedded signature/entitlement checks.
+- Approve the system VPN prompt and connect on iOS 15 or later.
+- Confirm the UI does not report a successful connection before its internet validation passes.
+- Confirm failed validation disconnects the tunnel.
+- Confirm public IPv4/IPv6 traffic uses Xray while private and link-local LAN services remain reachable.
+- Exercise sleep/wake, network changes, reconnect, disconnect and app relaunch.
+
+An Ad Hoc IPA can only be installed on registered devices. General user distribution must use TestFlight/App Store or another Apple-approved distribution method.

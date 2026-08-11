@@ -46,3 +46,41 @@ jobs:
 
       - name: Test
         run: dotnet test tests/SaeParTunnel.Core.Tests/SaeParTunnel.Core.Tests.csproj --configuration Release --no-build --verbosity normal
+
+  ios:
+    name: iOS Simulator Build
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Cache libXray Apple framework
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/saepar/libxray/v26.7.28/libxray-apple-cgo.zip
+          key: libxray-apple-v26.7.28-07f7ed7697277930
+
+      - name: Install MAUI workloads
+        run: dotnet workload install maui ios --skip-manifest-update
+
+      - name: Prepare libXray
+        run: ./native/ios/fetch-libxray.sh
+
+      - name: Build app and Packet Tunnel extension
+        shell: bash
+        run: |
+          simulator_rid="iossimulator-x64"
+          if [[ "$(uname -m)" == "arm64" ]]; then
+            simulator_rid="iossimulator-arm64"
+          fi
+
+          dotnet build src/SaeParTunnel.App/SaeParTunnel.App.csproj \
+            -f net9.0-ios \
+            -c Release \
+            -r "$simulator_rid"
