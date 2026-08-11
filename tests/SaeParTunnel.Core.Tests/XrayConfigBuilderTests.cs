@@ -160,6 +160,42 @@ public sealed class XrayConfigBuilderTests
     }
 
     [Fact]
+    public void BuildIosTunInjectsNetworkExtensionDescriptorAndKeepsPlatformRouting()
+    {
+        var settings = new AppSettings
+        {
+            EnableWhitelistRouting = true,
+            WhitelistWebsites = new List<string> { "ios.example.com" }
+        };
+
+        using var doc = JsonDocument.Parse(_builder.BuildIosTun(
+            VlessProfile(),
+            settings,
+            tunFileDescriptor: 17,
+            mtu: 1400));
+        var root = doc.RootElement;
+
+        Assert.Equal("17", root.GetProperty("env").GetProperty("xray.tun.fd").GetString());
+
+        var inbound = root.GetProperty("inbounds")[0];
+        Assert.Equal("tun", inbound.GetProperty("protocol").GetString());
+        Assert.Equal("utun", inbound.GetProperty("settings").GetProperty("name").GetString());
+        Assert.Equal(1400, inbound.GetProperty("settings").GetProperty("mtu").GetInt32());
+        Assert.Equal("direct", root.GetProperty("outbounds")[0].GetProperty("tag").GetString());
+
+        var rule = root.GetProperty("routing").GetProperty("rules")[0];
+        Assert.Equal("ios-whitelist-websites", rule.GetProperty("ruleTag").GetString());
+        Assert.Contains("domain:ios.example.com", Strings(rule.GetProperty("domain")));
+    }
+
+    [Fact]
+    public void BuildIosTunRejectsInvalidDescriptor()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            _builder.BuildIosTun(VlessProfile(), new AppSettings(), -1));
+    }
+
+    [Fact]
     public void BuildThrowsForUnsupportedProfile()
     {
         var profile = VlessProfile();
@@ -169,6 +205,7 @@ public sealed class XrayConfigBuilderTests
         Assert.Throws<NotSupportedException>(() => _builder.Build(profile, 10808, 10809));
         Assert.Throws<NotSupportedException>(() => _builder.BuildAndroidTun(profile, new AppSettings()));
         Assert.Throws<NotSupportedException>(() => _builder.BuildAndroidProbe(profile, 10808));
+        Assert.Throws<NotSupportedException>(() => _builder.BuildIosTun(profile, new AppSettings(), 17));
     }
 
     private JsonDocument Build(

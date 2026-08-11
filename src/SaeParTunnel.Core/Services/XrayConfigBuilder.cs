@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SaeParTunnel.Core.Models;
@@ -72,6 +73,46 @@ public sealed class XrayConfigBuilder
     /// </summary>
     public string BuildAndroidTun(ConfigProfile profile, AppSettings settings, int mtu = 1500)
     {
+        return BuildMobileTun(
+            profile,
+            settings,
+            mtu,
+            "saepar0",
+            "android-whitelist-websites");
+    }
+
+    /// <summary>
+    /// Builds an iOS full-device TUN configuration. NetworkExtension owns the
+    /// utun interface, so Xray receives that descriptor through its root env.
+    /// </summary>
+    public string BuildIosTun(
+        ConfigProfile profile,
+        AppSettings settings,
+        int tunFileDescriptor,
+        int mtu = 1400)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(tunFileDescriptor);
+
+        return BuildMobileTun(
+            profile,
+            settings,
+            mtu,
+            "utun",
+            "ios-whitelist-websites",
+            new Dictionary<string, string>
+            {
+                ["xray.tun.fd"] = tunFileDescriptor.ToString(CultureInfo.InvariantCulture)
+            });
+    }
+
+    private static string BuildMobileTun(
+        ConfigProfile profile,
+        AppSettings settings,
+        int mtu,
+        string interfaceName,
+        string whitelistRuleTag,
+        Dictionary<string, string>? environment = null)
+    {
         if (profile.Health == ProfileHealth.Unsupported)
             throw new NotSupportedException(profile.TestMessage);
 
@@ -85,7 +126,7 @@ public sealed class XrayConfigBuilder
             ["protocol"] = "tun",
             ["settings"] = new
             {
-                name = "saepar0",
+                name = interfaceName,
                 mtu
             },
             ["sniffing"] = BuildSniffing()
@@ -110,12 +151,14 @@ public sealed class XrayConfigBuilder
             ["log"] = new { loglevel = "info" },
             ["inbounds"] = new object[] { tunInbound },
             ["outbounds"] = outbounds,
-            // Android system DNS packets enter the TUN as ordinary UDP/TCP :53
-            // traffic. Route them direct so DNS does not depend on UDP support of
-            // the selected proxy. The DialerController protects these direct
-            // sockets from re-entering VpnService, avoiding a routing loop.
-            ["routing"] = BuildAndroidRouting(settings, websiteWhitelistEnabled)
+            // Mobile system DNS packets enter the TUN as ordinary traffic. Keep
+            // them on the selected routing path; each platform runtime is
+            // responsible for keeping Xray's own outbound sockets outside TUN.
+            ["routing"] = BuildMobileRouting(settings, websiteWhitelistEnabled, whitelistRuleTag)
         };
+
+        if (environment is not null)
+            root["env"] = environment;
 
         return JsonSerializer.Serialize(root, JsonOptions);
     }
@@ -145,13 +188,15 @@ public sealed class XrayConfigBuilder
         return JsonSerializer.Serialize(root, JsonOptions);
     }
 
-    private static object BuildAndroidRouting(AppSettings settings, bool websiteWhitelistEnabled)
+    private static object BuildMobileRouting(
+        AppSettings settings,
+        bool websiteWhitelistEnabled,
+        string whitelistRuleTag)
     {
-        // Do not force Android DNS direct here. Android sends its configured DNS
+        // Do not force mobile DNS direct here. The system sends configured DNS
         // traffic into the VPN like any other packet; keeping it on the proxy path
-        // matches the known-working OneXray architecture and avoids ISP-side DNS
-        // filtering/hijacking. libXray's *internal* resolver is separately protected
-        // by VpnService.protect() in the Java bridge.
+        // avoids ISP-side filtering and hijacking. The platform runtime separately
+        // keeps libXray's internal resolver outside the tunnel.
         var rules = new List<object>();
 
         if (websiteWhitelistEnabled)
@@ -170,7 +215,7 @@ public sealed class XrayConfigBuilder
                 {
                     domain = domains,
                     outboundTag = "proxy",
-                    ruleTag = "android-whitelist-websites"
+                    ruleTag = whitelistRuleTag
                 });
             }
         }
