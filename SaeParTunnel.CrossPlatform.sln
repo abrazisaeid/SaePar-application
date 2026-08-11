@@ -15,6 +15,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SaeParTunnel.iOSBinding", "src\SaeParTunnel.iOSBinding\SaeParTunnel.iOSBinding.csproj", "{543F4E36-1A4A-4C07-A3C4-A2F7AA5D77A6}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SaeParTunnel.iOS.Extension", "src\SaeParTunnel.iOS.Extension\SaeParTunnel.iOS.Extension.csproj", "{FB56465C-1002-4B60-BE44-8C1CCDAFB821}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -85,11 +87,24 @@ Global
 		{543F4E36-1A4A-4C07-A3C4-A2F7AA5D77A6}.Release|x64.Build.0 = Release|Any CPU
 		{543F4E36-1A4A-4C07-A3C4-A2F7AA5D77A6}.Release|x86.ActiveCfg = Release|Any CPU
 		{543F4E36-1A4A-4C07-A3C4-A2F7AA5D77A6}.Release|x86.Build.0 = Release|Any CPU
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821}.Debug|x64.Build.0 = Debug|Any CPU
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821}.Debug|x86.Build.0 = Debug|Any CPU
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821}.Release|x64.ActiveCfg = Release|Any CPU
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821}.Release|x64.Build.0 = Release|Any CPU
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821}.Release|x86.ActiveCfg = Release|Any CPU
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{543F4E36-1A4A-4C07-A3C4-A2F7AA5D77A6} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{FB56465C-1002-4B60-BE44-8C1CCDAFB821} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

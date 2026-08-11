@@ -20,7 +20,8 @@
     <SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
   </PropertyGroup>
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
-    <SupportedOSPlatformVersion>12.2</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+    <CodesignEntitlements>Platforms\iOS\Entitlements.plist</CodesignEntitlements>
   </PropertyGroup>
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
@@ -44,6 +45,13 @@
          A ProjectReference then brings both the managed binding assembly and
          its Java/native AAR dependencies into the Android app. -->
     <ProjectReference Include="..\SaeParTunnel.AndroidBinding\SaeParTunnel.AndroidBinding.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+    <ProjectReference Include="..\SaeParTunnel.iOSBinding\SaeParTunnel.iOSBinding.csproj" />
+    <ProjectReference Include="..\SaeParTunnel.iOS.Extension\SaeParTunnel.iOS.Extension.csproj">
+      <IsAppExtension>true</IsAppExtension>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>

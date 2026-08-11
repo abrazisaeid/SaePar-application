@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0-ios</TargetFramework>
+    <OutputType>Library</OutputType>
+    <RootNamespace>SaeParTunnel.iOS.Extension</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+    <IsAppExtension>true</IsAppExtension>
+    <ApplicationId>com.saepar.tunnel.packet-tunnel</ApplicationId>
+    <ApplicationDisplayVersion>2.0.21</ApplicationDisplayVersion>
+    <ApplicationVersion>41</ApplicationVersion>
+    <CodesignEntitlements>Entitlements.plist</CodesignEntitlements>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SaeParTunnel.Core\SaeParTunnel.Core.csproj" />
+    <ProjectReference Include="..\SaeParTunnel.iOSBinding\SaeParTunnel.iOSBinding.csproj" />
+  </ItemGroup>
+</Project>
