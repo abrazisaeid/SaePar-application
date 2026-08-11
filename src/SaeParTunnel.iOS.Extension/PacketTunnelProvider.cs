@@ -109,7 +109,9 @@ public class PacketTunnelProvider : NEPacketTunnelProvider
             throw new InvalidOperationException("The iOS VPN launch request is missing.");
         }
 
-        return JsonSerializer.Deserialize<IosTunnelRequest>(requestJson.ToString())
+        return JsonSerializer.Deserialize(
+                requestJson.ToString(),
+                IosTunnelJsonContext.Default.IosTunnelRequest)
             ?? throw new InvalidOperationException("The iOS VPN launch request is invalid.");
     }
 

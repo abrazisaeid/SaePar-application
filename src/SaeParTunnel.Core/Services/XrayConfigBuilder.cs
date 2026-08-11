@@ -170,6 +170,16 @@ public sealed class XrayConfigBuilder
     /// </summary>
     public string BuildAndroidProbe(ConfigProfile profile, int socksPort)
     {
+        return BuildMobileProbe(profile, socksPort);
+    }
+
+    public string BuildIosProbe(ConfigProfile profile, int socksPort)
+    {
+        return BuildMobileProbe(profile, socksPort);
+    }
+
+    private static string BuildMobileProbe(ConfigProfile profile, int socksPort)
+    {
         if (profile.Health == ProfileHealth.Unsupported)
             throw new NotSupportedException(profile.TestMessage);
 

@@ -160,6 +160,18 @@ public sealed class XrayConfigBuilderTests
     }
 
     [Fact]
+    public void BuildIosProbeCreatesAFullProxyTestConfiguration()
+    {
+        using var doc = JsonDocument.Parse(_builder.BuildIosProbe(VlessProfile(), socksPort: 28081));
+        var root = doc.RootElement;
+
+        Assert.Equal("socks", root.GetProperty("inbounds")[0].GetProperty("protocol").GetString());
+        Assert.Equal(28081, root.GetProperty("inbounds")[0].GetProperty("port").GetInt32());
+        Assert.Equal("proxy", root.GetProperty("outbounds")[0].GetProperty("tag").GetString());
+        Assert.False(root.TryGetProperty("routing", out _));
+    }
+
+    [Fact]
     public void BuildIosTunInjectsNetworkExtensionDescriptorAndKeepsPlatformRouting()
     {
         var settings = new AppSettings
@@ -205,6 +217,7 @@ public sealed class XrayConfigBuilderTests
         Assert.Throws<NotSupportedException>(() => _builder.Build(profile, 10808, 10809));
         Assert.Throws<NotSupportedException>(() => _builder.BuildAndroidTun(profile, new AppSettings()));
         Assert.Throws<NotSupportedException>(() => _builder.BuildAndroidProbe(profile, 10808));
+        Assert.Throws<NotSupportedException>(() => _builder.BuildIosProbe(profile, 10808));
         Assert.Throws<NotSupportedException>(() => _builder.BuildIosTun(profile, new AppSettings(), 17));
     }
 

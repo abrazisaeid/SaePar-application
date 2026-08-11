@@ -411,10 +411,46 @@ public sealed class MainViewModel : ObservableObject
             RefreshFilters();
             RefreshStats();
             RefreshCommunityHealthStatusMessage();
-            IsConnected = _tunnel.IsConnected;
+            string? initialConnectionMessage = null;
+            if (DeviceInfo.Platform == DevicePlatform.iOS)
+            {
+                try
+                {
+                    await _tunnel.EnsureReadyAsync(Settings);
+                    if (_tunnel.IsConnected)
+                    {
+                        StatusMessage = "در حال تأیید اتصال قبلی iOS...";
+                        var validation = await _tunnel.TestCurrentConnectionAsync(Settings);
+                        IsConnected = validation.Success && validation.Level == ValidationLevel.FullProxy;
+                        if (IsConnected)
+                        {
+                            initialConnectionMessage = $"✓ اینترنت از VPN iOS تأیید شد • {validation.Message}";
+                        }
+                        else
+                        {
+                            try { await _tunnel.DisconnectAsync(Settings); } catch { }
+                            initialConnectionMessage = "اتصال قبلی iOS اینترنت سالم نداشت و قطع شد.";
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    IsConnected = false;
+                    initialConnectionMessage = "راه‌اندازی VPN iOS آماده نیست: " + HumanizeException(ex);
+                }
+            }
+            else
+            {
+                IsConnected = _tunnel.IsConnected;
+            }
+
             StatusMessage = IsConnected ? $"VPN فعال • {BackendTitle}" : $"آماده • {BackendTitle}";
-            if (DeviceInfo.Platform == DevicePlatform.Android)
+            if (!string.IsNullOrWhiteSpace(initialConnectionMessage))
+                ConnectionStatusMessage = initialConnectionMessage;
+            else if (DeviceInfo.Platform == DevicePlatform.Android)
                 ConnectionStatusMessage = IsConnected ? "VPN Android فعال است." : "آماده برای اتصال؛ اگر مجوز قبلاً داده شده باشد Android پنجره مجوز را دوباره نشان نمی‌دهد.";
+            else if (DeviceInfo.Platform == DevicePlatform.iOS)
+                ConnectionStatusMessage = "آماده برای اتصال؛ iOS در اولین اتصال مجوز افزودن VPN را نمایش می‌دهد.";
             RefreshDiagnosticsReport();
         }
         finally
@@ -1155,7 +1191,9 @@ public sealed class MainViewModel : ObservableObject
                     StatusMessage = $"در حال اتصال به {profile.DisplayName}{attemptText}...";
                     ConnectionStatusMessage = DeviceInfo.Platform == DevicePlatform.Android
                         ? $"مرحله 1: بررسی مجوز VPN Android{attemptText}..."
-                        : $"در حال ساخت تونل{attemptText}...";
+                        : DeviceInfo.Platform == DevicePlatform.iOS
+                            ? $"مرحله 1: آماده‌سازی مجوز VPN iOS{attemptText}..."
+                            : $"در حال ساخت تونل{attemptText}...";
                     await _tunnel.EnsureReadyAsync(Settings, cancellationToken: default);
                     await _tunnel.ConnectAsync(profile, Settings);
 
@@ -1176,15 +1214,17 @@ public sealed class MainViewModel : ObservableObject
                         IsConnected = true;
                         StatusMessage = DeviceInfo.Platform == DevicePlatform.Android
                             ? $"VPN Android متصل و تست اینترنت تأیید شد: {profile.DisplayName}"
-                            : $"متصل و تست اینترنت تأیید شد: {profile.DisplayName} • HTTP محلی: 127.0.0.1:{Settings.HttpPort}";
-                        ConnectionStatusMessage = DeviceInfo.Platform == DevicePlatform.Android
-                            ? $"✓ اینترنت از VPN تأیید شد • {profile.DisplayName} • {validation.Message}"
-                            : $"✓ اینترنت از Proxy تأیید شد • {validation.Message}";
+                            : DeviceInfo.Platform == DevicePlatform.iOS
+                                ? $"VPN iOS متصل و تست اینترنت تأیید شد: {profile.DisplayName}"
+                                : $"متصل و تست اینترنت تأیید شد: {profile.DisplayName} • HTTP محلی: 127.0.0.1:{Settings.HttpPort}";
+                        ConnectionStatusMessage = DeviceInfo.Platform == DevicePlatform.WinUI
+                            ? $"✓ اینترنت از Proxy تأیید شد • {validation.Message}"
+                            : $"✓ اینترنت از VPN تأیید شد • {profile.DisplayName} • {validation.Message}";
                         await _store.SaveProfilesAsync(Profiles);
                         RefreshFilters();
                         RefreshStats();
                         RefreshDiagnosticsReport();
-                        if (DeviceInfo.Platform == DevicePlatform.Android && Shell.Current is not null)
+                        if ((DeviceInfo.Platform == DevicePlatform.Android || DeviceInfo.Platform == DevicePlatform.iOS) && Shell.Current is not null)
                             await Shell.Current.DisplayAlert("VPN متصل شد", $"اینترنت از SaePar Tunnel تأیید شد.\n{validation.Message}", "باشه");
                         return;
                     }
