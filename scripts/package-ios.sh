@@ -50,6 +50,7 @@ rm -f "$ipa_path"
 publish_arguments=(
   publish "$APP_PROJECT"
   -f net9.0-ios
+  -p:SaeParTargetFrameworks=net9.0-ios
   -c "$CONFIGURATION"
   -r ios-arm64
   -p:ArchiveOnBuild=true

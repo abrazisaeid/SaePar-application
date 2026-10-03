@@ -82,5 +82,6 @@ jobs:
 
           dotnet build src/SaeParTunnel.App/SaeParTunnel.App.csproj \
             -f net9.0-ios \
+            -p:SaeParTargetFrameworks=net9.0-ios \
             -c Release \
             -r "$simulator_rid"
