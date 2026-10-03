@@ -4,6 +4,7 @@
 
 - Android: install `SaeParTunnel-2.0.22-android.apk` on Android 7.0+ (arm64 or x86_64). The APK uses the existing release signing certificate, so it can update v2.0.21.
 - Windows: extract **all** files from `SaeParTunnel-2.0.22-windows-x64.zip`, then run `SaeParTunnel.App.exe`. The x64 .NET/Windows App SDK runtimes and official Xray v26.7.28 engine are included.
+- Alternatively run `SaeParTunnel-2.0.22-windows-x64.exe` to extract the complete app into a versioned folder and create Desktop/Start menu shortcuts, without administrator permissions.
 - SHA-256 checksums are provided in `SHA256SUMS.txt` beside the downloads.
 
 ## Changes
@@ -23,4 +24,5 @@
 - Android package ID `com.saepar.tunnel`, version `2.0.22`, version code `42`; APK signature verifies and certificate matches v2.0.21.
 - All 602 Windows ZIP file contents match the published files; EXE, native UI runtime, .NET runtime, Xray and its license are present. No private profiles/settings or signing keys are included.
 - Engine archive SHA-256 is pinned and checked during packaging.
+- The self-contained installation EXE verifies its embedded ZIP hash and all archive entries in `--verify` mode, without installing or launching the VPN application.
 - Physical Android/iOS device operation and live public-proxy connectivity were not verified in this session. Availability and time to find five working servers depend on the user's network and subscription contents.

@@ -4,6 +4,7 @@ GitHub Releases can contain these downloadable assets:
 
 - `SaeParTunnel-<version>-android.apk`
 - `SaeParTunnel-<version>-windows-x64.zip`
+- `SaeParTunnel-<version>-windows-x64.exe`
 - `SaeParTunnel-<version>-ios.ipa` when Apple signing is configured
 - `SHA256SUMS.txt`
 
@@ -12,6 +13,13 @@ and run `SaeParTunnel.App.exe`; keep the DLLs and other files beside the EXE.
 The package includes the verified official Xray v26.7.28 runtime and its license,
 so the first search does not require a separate engine download. Android APKs
 support Android 7.0+ on arm64 and x86_64 devices.
+
+The installation EXE contains the complete verified ZIP and its own .NET runtime.
+It installs into `%LOCALAPPDATA%\Programs\SaeParTunnel\<version>` and creates
+Desktop and Start menu shortcuts without administrator permissions. Each version
+has its own folder; user profiles/settings are stored separately. To remove a
+version, close the app and remove its version folder and shortcuts. Build this
+EXE separately after ZIP packaging with `scripts/package-windows-exe.ps1`.
 
 Do not commit release binaries, certificates, provisioning profiles, keystores or passwords to the repository.
 

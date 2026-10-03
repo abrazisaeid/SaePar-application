@@ -265,6 +265,7 @@ if (!$SkipWindows) {
     $zipOut = Join-Path $releaseRoot "SaeParTunnel-$assetVersion-windows-x64.zip"
     Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $zipOut -Force
     Write-Host "Windows ZIP: $zipOut" -ForegroundColor Green
+    & (Join-Path $PSScriptRoot 'package-windows-exe.ps1') -Version $assetVersion
 }
 
 Write-Checksums $releaseRoot
