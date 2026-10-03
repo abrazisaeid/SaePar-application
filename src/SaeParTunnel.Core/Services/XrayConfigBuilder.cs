@@ -309,7 +309,16 @@ public sealed class XrayConfigBuilder
     private static object BuildPrivateNetworkRule() => new
     {
         type = "field",
-        ip = new[] { "geoip:private" },
+        // Equivalent of Loyalsoldier/geoip release/text/private.txt, with no
+        // dependency on an external geoip.dat in mobile app-private storage.
+        ip = new[]
+        {
+            "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+            "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
+            "192.88.99.0/24", "192.168.0.0/16", "198.18.0.0/15",
+            "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/3",
+            "::/127", "fc00::/7", "fe80::/10", "ff00::/8"
+        },
         outboundTag = "direct",
         ruleTag = "private-networks"
     };

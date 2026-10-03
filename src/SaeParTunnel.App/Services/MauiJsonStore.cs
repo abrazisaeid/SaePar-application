@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Maui.Storage;
 using SaeParTunnel.Core.Models;
 using SaeParTunnel.Core.Services;
@@ -7,12 +6,8 @@ namespace SaeParTunnel.App.Services;
 
 public sealed class MauiJsonStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = false,
-        PropertyNameCaseInsensitive = true
-    };
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly JsonCacheStore _files = new();
+    public string LastStorageError { get; private set; } = string.Empty;
 
     public string RootPath
     {
@@ -101,28 +96,27 @@ public sealed class MauiJsonStore
 
     private async Task<T?> ReadAsync<T>(string path)
     {
-        await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (!File.Exists(path)) return default;
-            await using var stream = File.OpenRead(path);
-            return await Task.Run(async () => await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions)).ConfigureAwait(false);
+            return await Task.Run(() => _files.ReadAsync<T>(path)).ConfigureAwait(false);
         }
-        catch { return default; }
-        finally { _gate.Release(); }
+        catch
+        {
+            LastStorageError = $"خواندن {Path.GetFileName(path)} انجام نشد؛ فایل ذخیره‌شده حفظ شد.";
+            throw;
+        }
     }
 
     private async Task WriteAsync<T>(string path, T value)
     {
-        await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var temp = path + ".tmp";
-            await using (var stream = File.Create(temp))
-                await Task.Run(async () => await JsonSerializer.SerializeAsync(stream, value, JsonOptions)).ConfigureAwait(false);
-            File.Move(temp, path, true);
+            await Task.Run(() => _files.WriteAsync(path, value)).ConfigureAwait(false);
         }
-        finally { _gate.Release(); }
+        catch
+        {
+            LastStorageError = $"ذخیرهٔ {Path.GetFileName(path)} انجام نشد؛ نتیجهٔ قبلی حفظ شد.";
+            throw;
+        }
     }
 }

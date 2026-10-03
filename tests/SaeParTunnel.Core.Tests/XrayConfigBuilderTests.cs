@@ -70,7 +70,9 @@ public sealed class XrayConfigBuilderTests
 
         Assert.Equal("field", privateRule.GetProperty("type").GetString());
         Assert.Equal("direct", privateRule.GetProperty("outboundTag").GetString());
-        Assert.Contains("geoip:private", Strings(privateRule.GetProperty("ip")));
+        Assert.Contains("192.168.0.0/16", Strings(privateRule.GetProperty("ip")));
+        Assert.Contains("fc00::/7", Strings(privateRule.GetProperty("ip")));
+        Assert.DoesNotContain("geoip:private", Strings(privateRule.GetProperty("ip")));
     }
 
     [Fact]

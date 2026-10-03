@@ -108,6 +108,29 @@ public sealed class IranRoutingTests
         Assert.Throws<ArgumentException>(() => RoutingListParser.Parse(new string('x', RoutingListParser.MaxTextLength + 1)));
     }
 
+    [Theory]
+    [InlineData("windows", true)]
+    [InlineData("windows", false)]
+    [InlineData("android", true)]
+    [InlineData("android", false)]
+    [InlineData("ios", true)]
+    [InlineData("ios", false)]
+    public void ProductionRoutingNeedsNoExternalGeoipOrGeositeFiles(string platform, bool iranBypass)
+    {
+        using var doc = Build(platform, new AppSettings { EnableIranBypass = iranBypass });
+        var json = doc.RootElement.GetRawText();
+        Assert.DoesNotContain("geoip:", json);
+        Assert.DoesNotContain("geosite:", json);
+        Assert.DoesNotContain("ext:", json);
+        var rules = doc.RootElement.GetProperty("routing").GetProperty("rules").EnumerateArray().ToArray();
+        var privateIps = Values(Find(rules, "private-networks"), "ip");
+        Assert.Contains("192.168.0.0/16", privateIps);
+        Assert.Contains("127.0.0.0/8", privateIps);
+        Assert.Contains("fc00::/7", privateIps);
+        foreach (var rule in rules.Where(r => r.TryGetProperty("ip", out _)))
+            Assert.All(Values(rule, "ip"), ip => Assert.NotNull(RoutingListParser.Normalize(ip)));
+    }
+
     private static string Tag(JsonElement rule) => rule.GetProperty("ruleTag").GetString()!;
     private static JsonElement Find(JsonElement[] rules, string tag) => rules.Single(r => Tag(r) == tag);
     private static string[] Values(JsonElement rule, string name) => rule.GetProperty(name).EnumerateArray().Select(v => v.GetString()!).ToArray();

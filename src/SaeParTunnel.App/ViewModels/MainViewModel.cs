@@ -375,6 +375,16 @@ public sealed class MainViewModel : ObservableObject
         if (Settings.AutoCleanupOldServers) await RemoveOldFailedProfilesAsync();
     }
 
+    private async Task PersistFinishedTestRunAsync()
+    {
+        try
+        {
+            await ApplyAutomaticCleanupAsync();
+            await _store.SaveProfilesAsync(Profiles);
+        }
+        finally { IsTesting = false; IsBusy = false; }
+    }
+
     private async Task CleanupOldServersAsync()
     {
         IsBusy = true;
@@ -752,6 +762,14 @@ public sealed class MainViewModel : ObservableObject
             else if (DeviceInfo.Platform == DevicePlatform.iOS)
                 ConnectionStatusMessage = "آماده برای اتصال؛ iOS در اولین اتصال مجوز افزودن VPN را نمایش می‌دهد.";
             RefreshDiagnosticsReport();
+        }
+        catch (Exception)
+        {
+            StatusMessage = "خواندن داده‌های ذخیره‌شده انجام نشد؛ فهرست قبلی پاک نشده است.";
+            _homeNotice = _store.LastStorageError.Length > 0 ? _store.LastStorageError : StatusMessage;
+            ConnectionStatusMessage = _homeNotice;
+            RefreshDiagnosticsReport();
+            NotifyHomeChanged();
         }
         finally
         {
@@ -1431,7 +1449,9 @@ public sealed class MainViewModel : ObservableObject
             }
 
             var old = profile.Health;
-            await MainThread.InvokeOnMainThreadAsync(() => profile.Health = ProfileHealth.Testing);
+            // Retain the last successful state while a cached server is retested.
+            if (old != ProfileHealth.Working)
+                await MainThread.InvokeOnMainThreadAsync(() => profile.Health = ProfileHealth.Testing);
             try
             {
                 var result = await _tunnel.TestAsync(profile, Settings, workerToken).ConfigureAwait(false);
@@ -1448,9 +1468,13 @@ public sealed class MainViewModel : ObservableObject
                     if (newHealth is ProfileHealth.Working or ProfileHealth.Reachable) ProgressWorking++;
                     if (newHealth == ProfileHealth.Working) ProgressFullWorking++;
                     else if (newHealth == ProfileHealth.Failed) ProgressFailed++;
-                    if (newHealth == ProfileHealth.Working) RefreshStats();
                     MaybeUpdateProgress(sw, done, done == ProgressTotal);
                 });
+                if (newHealth == ProfileHealth.Working)
+                {
+                    await _store.SaveProfilesAsync(Profiles);
+                    await MainThread.InvokeOnMainThreadAsync(RefreshStats);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -1534,8 +1558,7 @@ public sealed class MainViewModel : ObservableObject
         finally
         {
             MaybeUpdateProgress(sw, tested, true);
-            await ApplyAutomaticCleanupAsync();
-            await _store.SaveProfilesAsync(Profiles);
+            await PersistFinishedTestRunAsync();
             RefreshFilters(); RefreshStats();
             IsTesting = false; IsBusy = false;
             StatusMessage = ct.IsCancellationRequested
@@ -1671,6 +1694,8 @@ public sealed class MainViewModel : ObservableObject
                         else if (newHealth == ProfileHealth.Failed) ProgressFailed++;
                         MaybeUpdateProgress(sw, done, done == ProgressTotal);
                     });
+                    if (newHealth == ProfileHealth.Working)
+                        await _store.SaveProfilesAsync(Profiles);
                 }
                 catch (OperationCanceledException)
                 {
@@ -1688,8 +1713,7 @@ public sealed class MainViewModel : ObservableObject
         finally
         {
             MaybeUpdateProgress(sw, tested, true);
-            await ApplyAutomaticCleanupAsync();
-            await _store.SaveProfilesAsync(Profiles);
+            await PersistFinishedTestRunAsync();
             RefreshFilters(); RefreshStats();
             IsTesting = false; IsBusy = false;
             StatusMessage = ct.IsCancellationRequested
@@ -1990,6 +2014,7 @@ public sealed class MainViewModel : ObservableObject
         builder.AppendLine($"Connection: {ConnectionBadgeText}");
         builder.AppendLine($"Connection message: {ConnectionStatusMessage}");
         builder.AppendLine($"Profiles: total={TotalProfiles}, working={WorkingProfiles}, reachable={ReachableProfiles}, failed={FailedProfiles}, untested={UntestedProfiles}");
+        if (_store.LastStorageError.Length > 0) builder.AppendLine($"Storage: {_store.LastStorageError}");
         builder.AppendLine($"Recommended: {RecommendedProfileName} | {RecommendedProfileScoreText}");
         builder.AppendLine($"Selected: {(selected is null ? "-" : $"{selected.DisplayName} | {selected.Endpoint} | {selected.QualitySummaryText} | {selected.HealthText}")}");
         builder.AppendLine($"Ports: socks={Settings.SocksPort}, http={Settings.HttpPort}, probe={Settings.ProbePort}");
