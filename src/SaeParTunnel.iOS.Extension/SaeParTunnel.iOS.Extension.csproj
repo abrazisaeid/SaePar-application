@@ -8,8 +8,8 @@
     <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
     <IsAppExtension>true</IsAppExtension>
     <ApplicationId>com.saepar.tunnel.packet-tunnel</ApplicationId>
-    <ApplicationDisplayVersion>2.0.21</ApplicationDisplayVersion>
-    <ApplicationVersion>41</ApplicationVersion>
+    <ApplicationDisplayVersion>2.0.22</ApplicationDisplayVersion>
+    <ApplicationVersion>42</ApplicationVersion>
     <CodesignEntitlements>Entitlements.plist</CodesignEntitlements>
     <CodesignKey Condition="'$(IosSigningKey)' != ''">$(IosSigningKey)</CodesignKey>
     <CodesignKeychain Condition="'$(IosSigningKeychain)' != ''">$(IosSigningKeychain)</CodesignKeychain>

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFrameworks>net9.0-android;net9.0-ios;net9.0-windows10.0.19041.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(SaeParTargetFrameworks)' != ''">$(SaeParTargetFrameworks)</TargetFrameworks>
     <OutputType>Exe</OutputType>
     <RootNamespace>SaeParTunnel.App</RootNamespace>
     <UseMaui>true</UseMaui>
@@ -10,10 +11,10 @@
     <LangVersion>latest</LangVersion>
     <ApplicationTitle>SaePar Tunnel</ApplicationTitle>
     <ApplicationId>com.saepar.tunnel</ApplicationId>
-    <ApplicationDisplayVersion>2.0.21</ApplicationDisplayVersion>
-    <ApplicationVersion>41</ApplicationVersion>
-    <Version>2.0.21</Version>
-    <PackageVersion>2.0.21</PackageVersion>
+    <ApplicationDisplayVersion>2.0.22</ApplicationDisplayVersion>
+    <ApplicationVersion>42</ApplicationVersion>
+    <Version>2.0.22</Version>
+    <PackageVersion>2.0.22</PackageVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">

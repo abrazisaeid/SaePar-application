@@ -3,6 +3,7 @@ param(
     [string]$Configuration = 'Release',
     [string]$WindowsRuntimeIdentifier = 'win10-x64',
     [bool]$WindowsSelfContained = $true,
+    [bool]$BundleWindowsXray = $true,
     [switch]$SkipAndroid,
     [switch]$SkipWindows,
     [string]$AndroidKeyStore,
@@ -132,8 +133,44 @@ function Write-Checksums([string]$releaseRoot) {
     Set-Content -LiteralPath $checksumPath -Value $lines -Encoding ascii
 }
 
+function Add-WindowsXray([string]$publishDir) {
+    # Pin the same core version as the Android/iOS native bindings. Never copy
+    # a user's runtime directory: it can contain private connection profiles.
+    $runtimeVersion = '26.7.28'
+    $expectedHash = 'c7172078fca4711bcd92a4774dcd1822544579c58816197575c47533317fd8d1'
+    $cacheRoot = Join-Path $repoRoot 'artifacts\runtime'
+    New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
+    $archive = Join-Path $cacheRoot "Xray-windows-64-$runtimeVersion.zip"
+    if (!(Test-Path -LiteralPath $archive) -or (Get-ContentHash $archive) -ne $expectedHash) {
+        Invoke-WebRequest "https://github.com/XTLS/Xray-core/releases/download/v$runtimeVersion/Xray-windows-64.zip" `
+            -UseBasicParsing -TimeoutSec 120 -OutFile $archive
+    }
+    if ((Get-ContentHash $archive) -ne $expectedHash) {
+        throw 'Official Windows Xray archive checksum mismatch.'
+    }
+
+    $runtimeRoot = Join-Path $cacheRoot "xray-$runtimeVersion"
+    Expand-Archive -LiteralPath $archive -DestinationPath $runtimeRoot -Force
+    foreach ($name in @('xray.exe', 'geoip.dat', 'geosite.dat')) {
+        Copy-Item -LiteralPath (Join-Path $runtimeRoot $name) -Destination $publishDir -Force
+    }
+    $noticeDir = Join-Path $publishDir 'ThirdParty\Xray'
+    New-Item -ItemType Directory -Force -Path $noticeDir | Out-Null
+    foreach ($name in @('LICENSE', 'README.md')) {
+        Copy-Item -LiteralPath (Join-Path $runtimeRoot $name) -Destination $noticeDir -Force
+    }
+    Set-Content -LiteralPath (Join-Path $noticeDir 'SOURCE.txt') -Encoding ascii -Value @(
+        "XTLS/Xray-core v$runtimeVersion",
+        "https://github.com/XTLS/Xray-core/tree/v$runtimeVersion",
+        "Official archive SHA256: $expectedHash"
+    )
+}
+
 $releaseTag = Convert-ToReleaseTag $Version
 $assetVersion = $releaseTag -replace '^[vV]', ''
+if ($assetVersion -ne (Get-ProjectVersion)) {
+    throw 'Release version must match ApplicationDisplayVersion in the app project.'
+}
 $releaseRoot = Join-Path $repoRoot "artifacts\release\$releaseTag"
 New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
 
@@ -161,6 +198,7 @@ if (!$SkipAndroid) {
     $androidArgs = @(
         'publish', $appProject,
         '-f', $androidFramework,
+        "-p:SaeParTargetFrameworks=$androidFramework",
         '-c', $Configuration,
         '-p:AndroidPackageFormats=apk',
         '-p:AndroidKeyStore=true',
@@ -189,6 +227,7 @@ if (!$SkipWindows) {
     $windowsArgs = @(
         'publish', $appProject,
         '-f', $windowsFramework,
+        "-p:SaeParTargetFrameworks=$windowsFramework",
         '-c', $Configuration,
         "-p:RuntimeIdentifierOverride=$WindowsRuntimeIdentifier",
         '-p:WindowsPackageType=None',
@@ -208,6 +247,20 @@ if (!$SkipWindows) {
     if ([string]::IsNullOrWhiteSpace($publishDir)) {
         throw "Windows publish directory was not found under: $($windowsPublishRoots -join ', ')"
     }
+
+    if ($BundleWindowsXray) {
+        Write-Host 'Bundling verified Windows Xray runtime...' -ForegroundColor Cyan
+        Add-WindowsXray $publishDir
+    }
+    Set-Content -LiteralPath (Join-Path $publishDir 'START-HERE.txt') -Encoding utf8 -Value @(
+        "SaePar Tunnel $assetVersion - Windows x64",
+        'Extract ALL files from the ZIP to one folder, then run SaeParTunnel.App.exe.',
+        'Keep the DLLs and other files beside the EXE. No separate .NET installation is needed.',
+        'Use Search to find five working servers, select one, then Connect.',
+        'Use the Ping button to test the selected server again; Disconnect ends the connection.',
+        'Advanced settings are available in the second tab.',
+        'Official Xray runtime and license are bundled. Server availability depends on your network.'
+    )
 
     $zipOut = Join-Path $releaseRoot "SaeParTunnel-$assetVersion-windows-x64.zip"
     Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $zipOut -Force

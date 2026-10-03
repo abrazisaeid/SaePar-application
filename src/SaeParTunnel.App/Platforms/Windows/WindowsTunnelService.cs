@@ -17,7 +17,9 @@ namespace SaeParTunnel.App.Platforms.Windows;
 
 public sealed class WindowsTunnelService : ITunnelService
 {
-    private const int MaxConcurrentXrayTests = 6;
+    private static readonly int MaxConcurrentXrayTests =
+        Environment.ProcessorCount >= 8 && GC.GetGCMemoryInfo().TotalAvailableMemoryBytes >= 8L * 1024 * 1024 * 1024
+            ? 8 : 6;
     private static readonly ConcurrentDictionary<int, byte> ReservedPorts = new();
     private static readonly SemaphoreSlim XrayInstallGate = new(1, 1);
     private static readonly SemaphoreSlim XrayTestGate = new(MaxConcurrentXrayTests, MaxConcurrentXrayTests);
@@ -204,17 +206,23 @@ public sealed class WindowsTunnelService : ITunnelService
                 AllowAutoRedirect = false
             };
             using var client = new HttpClient(handler) { Timeout = timeout };
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(timeout);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("SaeParTunnel/2.0");
 
             var sw = Stopwatch.StartNew();
             using var response = await client.GetAsync(
                 endpoint,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+                deadline.Token);
             sw.Stop();
 
             var code = (int)response.StatusCode;
-            return code >= 200 && code < 500 && code != (int)HttpStatusCode.ProxyAuthenticationRequired
+            var valid = endpoint.EndsWith("generate_204", StringComparison.Ordinal)
+                ? response.StatusCode == HttpStatusCode.NoContent
+                : response.StatusCode == HttpStatusCode.OK &&
+                  (await response.Content.ReadAsStringAsync(deadline.Token)).Trim() == "Microsoft Connect Test";
+            return valid
                 ? new TestResult(true, (int)sw.ElapsedMilliseconds, $"{host}=HTTP {code} • {sw.ElapsedMilliseconds:N0} ms", ValidationLevel.FullProxy)
                 : new TestResult(false, null, $"{host}=HTTP {code}", ValidationLevel.FullProxy);
         }
@@ -335,17 +343,20 @@ public sealed class WindowsTunnelService : ITunnelService
             {
                 using var handler = new HttpClientHandler { UseProxy = !direct };
                 using var client = CreateDownloadClient(handler);
-                using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+                using var downloadDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                downloadDeadline.CancelAfter(TimeSpan.FromSeconds(60));
+                var downloadToken = downloadDeadline.Token;
+                using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, downloadToken);
                 response.EnsureSuccessStatusCode();
                 var total = response.Content.Headers.ContentLength;
-                await using var input = await response.Content.ReadAsStreamAsync(ct);
+                await using var input = await response.Content.ReadAsStreamAsync(downloadToken);
                 await using var output = File.Create(zip);
                 var buffer = new byte[81920];
                 long done = 0;
                 int read;
-                while ((read = await input.ReadAsync(buffer, ct)) > 0)
+                while ((read = await input.ReadAsync(buffer, downloadToken)) > 0)
                 {
-                    await output.WriteAsync(buffer.AsMemory(0, read), ct);
+                    await output.WriteAsync(buffer.AsMemory(0, read), downloadToken);
                     done += read;
                     if (total > 0) progress?.Report(done * 100d / total.Value);
                 }
@@ -353,7 +364,7 @@ public sealed class WindowsTunnelService : ITunnelService
                 break;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException)
             {
                 errors.Add($"Xray ZIP ({(direct ? "direct" : "system proxy")}): {FlattenException(ex)}");
                 try { File.Delete(zip); } catch { }
@@ -408,8 +419,14 @@ public sealed class WindowsTunnelService : ITunnelService
                 RedirectStandardOutput = true
             }, EnableRaisingEvents = true
         };
-        p.OutputDataReceived += (_, e) => { if (!string.IsNullOrWhiteSpace(e.Data)) diag.Enqueue(e.Data); };
-        p.ErrorDataReceived += (_, e) => { if (!string.IsNullOrWhiteSpace(e.Data)) diag.Enqueue(e.Data); };
+        void Record(string? line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return;
+            diag.Enqueue(line);
+            while (diag.Count > 100) diag.TryDequeue(out _);
+        }
+        p.OutputDataReceived += (_, e) => Record(e.Data);
+        p.ErrorDataReceived += (_, e) => Record(e.Data);
         if (!p.Start()) throw new InvalidOperationException("اجرای Xray ممکن نشد.");
         p.BeginOutputReadLine(); p.BeginErrorReadLine(); return p;
     }

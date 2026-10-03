@@ -50,16 +50,18 @@ public sealed class CommunityHealthService : IDisposable
         var errors = new List<string>();
         foreach (var mode in new[] { (Client: _systemProxyClient, Direct: false), (Client: _directClient, Direct: true) })
         {
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            attempt.CancelAfter(TimeSpan.FromSeconds(25));
             try
             {
-                return await FetchOneAsync(mode.Client, requestedUrl, previousETag, mode.Direct, cancellationToken)
+                return await FetchOneAsync(mode.Client, requestedUrl, previousETag, mode.Direct, attempt.Token)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException or JsonException)
+            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException or JsonException)
             {
                 errors.Add($"{(mode.Direct ? "direct" : "system proxy")}: {FlattenException(ex)}");
             }

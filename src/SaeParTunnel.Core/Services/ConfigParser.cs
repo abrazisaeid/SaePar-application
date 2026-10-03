@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using SaeParTunnel.Core.Models;
@@ -7,6 +8,26 @@ namespace SaeParTunnel.Core.Services;
 
 public sealed class ConfigParser
 {
+    // Keep aligned with Xray v26.7.28 common/geodata/consts.go.
+    private static readonly IPNetwork[] PrivateNetworks = new[]
+    {
+        "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+        "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16",
+        "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/3",
+        "::/127", "fc00::/7", "fe80::/10", "ff00::/8"
+    }.Select(IPNetwork.Parse).ToArray();
+
+    private static bool IsPrivateEndpoint(string address)
+    {
+        if (IPAddress.TryParse(address, out var ip))
+        {
+            if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+            return PrivateNetworks.Any(network => network.Contains(ip));
+        }
+        var domain = address.TrimEnd('.').ToLowerInvariant();
+        return !domain.Contains('.') || new[] { "lan", "localdomain", "example", "invalid", "localhost", "test", "local", "home.arpa", "internal" }
+            .Any(suffix => domain == suffix || domain.EndsWith("." + suffix, StringComparison.Ordinal));
+    }
     public ConfigProfile? Parse(string raw, string source, out string error)
     {
         error = string.Empty;
@@ -236,6 +257,32 @@ public sealed class ConfigParser
         if (profile.Health == ProfileHealth.Unsupported)
             return;
 
+        if (profile.Security is not ("none" or "" or "tls" or "reality"))
+        {
+            MarkUnsupported(profile, $"Security «{profile.Security}» در Xray پشتیبانی نمی‌شود.");
+            return;
+        }
+
+        if (profile.Security == "tls" && profile.AllowInsecure)
+        {
+            MarkUnsupported(profile, "گزینه allowInsecure در Xray 26.7.28 حذف شده؛ لینک معتبر با تأیید گواهی TLS لازم است.");
+            return;
+        }
+
+        if ((profile.Security is "none" or "") && !IsPrivateEndpoint(profile.Address) &&
+            (profile.Protocol == ProxyProtocol.Trojan ||
+             (profile.Protocol == ProxyProtocol.Vless && profile.Encryption is "none" or "")))
+        {
+            MarkUnsupported(profile, "Xray 26.7.28 اتصال عمومی VLESS/Trojan بدون TLS یا رمزنگاری را نمی‌پذیرد.");
+            return;
+        }
+
+        if (profile.Network is not ("raw" or "websocket" or "grpc" or "xhttp" or "httpupgrade" or "mkcp" or "http" or "quic"))
+        {
+            MarkUnsupported(profile, $"Transport «{profile.Network}» پشتیبانی نمی‌شود.");
+            return;
+        }
+
         if (profile.Protocol == ProxyProtocol.Vmess && profile.AlterId > 0)
         {
             MarkUnsupported(profile, "VMess با AlterId در Xray جدید پشتیبانی نمی‌شود.");
@@ -316,9 +363,10 @@ public sealed class ConfigParser
         var value => value
     };
 
-    private static string ComputeId(ConfigProfile profile)
+    public static string ComputeId(ConfigProfile profile)
     {
-        var canonical = string.Join('|',
+        // JSON preserves field boundaries even when credentials contain '|'.
+        var canonical = JsonSerializer.Serialize(new object[] {
             profile.Protocol,
             profile.Address.ToLowerInvariant(),
             profile.Port,
@@ -333,7 +381,15 @@ public sealed class ConfigParser
             profile.Flow,
             profile.PublicKey,
             profile.ShortId,
-            profile.AllowInsecure);
+            profile.AllowInsecure,
+            profile.Fingerprint,
+            profile.ServiceName,
+            profile.Authority,
+            profile.HeaderType,
+            profile.Mode,
+            profile.Alpn,
+            profile.SpiderX,
+            profile.AlterId });
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }

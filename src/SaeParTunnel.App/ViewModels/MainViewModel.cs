@@ -21,6 +21,7 @@ namespace SaeParTunnel.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {
+    private const int SimpleSearchHealthyTarget = 5;
     private enum ConnectionUiPhase
     {
         Idle,
@@ -43,6 +44,15 @@ public sealed class MainViewModel : ObservableObject
     private bool _isBusy;
     private bool _initialized;
     private bool _isTesting;
+    private bool _findingServers;
+    private bool _homeSearchCompleted;
+    private CancellationTokenSource? _discoveryCts;
+    private string _homeNotice = "";
+    private bool _isPinging;
+    private string? _activeProfileId;
+    private int? _healthySearchTarget;
+    private string _pingFeedback = "";
+    private string _cleanupSummary = "سرور قدیمی پس از ۳ تست ناموفق پیاپی پاک می‌شود؛ سرور فعال حفظ می‌شود.";
     private bool _isConnected;
     private ConnectionUiPhase _connectionUiPhase;
     private bool _showAdvancedConfigTools;
@@ -78,6 +88,9 @@ public sealed class MainViewModel : ObservableObject
         _store = store; _extractor = extractor; _github = github; _communityHealth = communityHealth; _qrCode = qrCode; _tunnel = tunnel;
 
         GetConfigCommand = new Command(async () => await RunSafeAsync(GetConfigAsync));
+        FindServersCommand = new Command(async () => await RunSafeAsync(FindServersAsync));
+        PingSelectedServerCommand = new Command(async () => await RunSafeAsync(PingSelectedServerAsync));
+        CleanupOldServersCommand = new Command(async () => await RunSafeAsync(CleanupOldServersAsync));
         FetchSubscriptionCommand = new Command<SubscriptionSourceViewModel>(async source =>
         {
             if (source is not null) await RunSafeAsync(() => FetchSubscriptionAsync(source));
@@ -142,7 +155,7 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!SetProperty(ref _selectedProfile, value)) return;
             OnPropertyChanged(nameof(SelectedProfileSummary));
-            if (value?.Health == ProfileHealth.Working && !ReferenceEquals(_selectedHealthyProfile, value))
+            if (!IsConnected && value?.Health == ProfileHealth.Working && !ReferenceEquals(_selectedHealthyProfile, value))
             {
                 _selectedHealthyProfile = value;
                 OnPropertyChanged(nameof(SelectedHealthyProfile));
@@ -157,11 +170,15 @@ public sealed class MainViewModel : ObservableObject
         get => _selectedHealthyProfile;
         set
         {
+            if (IsConnected && value?.Id != _activeProfileId) return;
             if (!SetProperty(ref _selectedHealthyProfile, value)) return;
+            _homeNotice = "";
+            _pingFeedback = "";
             if (value is not null) SelectedProfile = value;
             OnPropertyChanged(nameof(SelectedHealthyPingText));
             OnPropertyChanged(nameof(HealthySelectionSummary));
             OnPropertyChanged(nameof(HasSelectedHealthyProfile));
+            NotifyHomeChanged();
         }
     }
     public bool HasSelectedHealthyProfile => SelectedHealthyProfile is not null;
@@ -197,6 +214,166 @@ public sealed class MainViewModel : ObservableObject
         }
     }
     public bool IsNotBusy => !IsBusy;
+    public Command FindServersCommand { get; }
+    public Command PingSelectedServerCommand { get; }
+    public Command CleanupOldServersCommand { get; }
+    public string CleanupSummary { get => _cleanupSummary; private set => SetProperty(ref _cleanupSummary, value); }
+    public bool CanPingSelectedServer => SelectedHealthyProfile is not null && IsNotBusy && !_findingServers && !IsConnectionBusy &&
+        (!IsConnected || SelectedHealthyProfile.Id == _activeProfileId);
+    public string PingButtonText => _isPinging ? "در حال اندازه‌گیری…" : "گرفتن پینگ";
+    public string PingFeedback => _pingFeedback;
+    public bool HasPingFeedback => _pingFeedback.Length > 0;
+    public bool HasHomeServers => HealthyProfiles.Count > 0;
+    public bool ShowHomeConnectAction => !IsConnected && (HasHomeServers || IsConnectionBusy);
+    public bool CanCancelHomeSearch => _findingServers || IsTesting;
+    public bool CanSearchServers => CanStartConnection && !_findingServers;
+    public bool CanConnectHome => CanStartConnection && !_findingServers && SelectedHealthyProfile is not null && CanTunnel;
+    public string SearchServersLabel => HasHomeServers ? "جست‌وجوی دوبارهٔ سرورها" : "پیدا کردن سرور";
+    public string HomeConnectionTitle => IsConnectionBusy ? ConnectionBadgeText : IsConnected ? "متصل هستی" : "آمادهٔ اتصال";
+    public string HomeSearchProgress => $"{ProgressDone:N0} بررسی شد · {ProgressFullWorking:N0} سرور سالم";
+    public string HomeHint => !CanTunnel ? "اتصال روی این دستگاه پشتیبانی نمی‌شود."
+        : _isPinging ? "در حال گرفتن پینگ همین سرور…"
+        : _findingServers ? (IsTesting ? "در حال بررسی سرورها؛ کمی صبر کن." : "در حال دریافت سرورها…")
+        : IsConnectionBusy ? "چند لحظه صبر کن…"
+        : IsConnected ? "برای پایان، قطع اتصال را بزن."
+        : _homeNotice.Length > 0 ? _homeNotice
+        : HasHomeServers ? "سرور آماده است. اتصال را بزن."
+        : _homeSearchCompleted ? "سرور سالمی پیدا نشد. اینترنت را بررسی کن و دوباره جست‌وجو کن."
+        : "برای شروع، پیدا کردن سرور را بزن.";
+
+    private void NotifyHomeChanged()
+    {
+        foreach (var name in new[] { nameof(HasHomeServers), nameof(CanSearchServers), nameof(CanConnectHome),
+            nameof(SearchServersLabel), nameof(HomeConnectionTitle), nameof(HomeHint), nameof(HomeSearchProgress), nameof(CanCancelHomeSearch), nameof(ShowHomeConnectAction),
+            nameof(CanPingSelectedServer), nameof(PingButtonText), nameof(PingFeedback), nameof(HasPingFeedback) })
+            OnPropertyChanged(name);
+    }
+
+    private async Task PingSelectedServerAsync()
+    {
+        if (!CanPingSelectedServer || SelectedHealthyProfile is not { } profile) return;
+        _isPinging = true;
+        _pingFeedback = "";
+        IsBusy = true;
+        NotifyHomeChanged();
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var result = IsConnected
+                ? await _tunnel.TestCurrentConnectionAsync(Settings, deadline.Token)
+                : await _tunnel.TestAsync(profile, Settings, deadline.Token);
+            profile.LatencyMs = result.Success ? result.LatencyMs : null;
+            profile.LastTested = DateTime.Now;
+            profile.TestMessage = FormatTestDetails(result);
+            if (result.Success)
+            {
+                profile.FailureCount = 0;
+                profile.Health = result.Level == ValidationLevel.FullProxy ? ProfileHealth.Working : ProfileHealth.Reachable;
+            }
+            else if (!IsConnected)
+            {
+                profile.FailureCount++;
+                profile.Health = ProfileHealth.Failed;
+            }
+            _pingFeedback = result.Success && result.LatencyMs.HasValue
+                ? "پینگ همین الان به‌روز شد."
+                : "پاسخی دریافت نشد؛ می‌توانی دوباره امتحان کنی.";
+            await ApplyAutomaticCleanupAsync();
+            await _store.SaveProfilesAsync(Profiles);
+        }
+        catch (OperationCanceledException)
+        {
+            profile.LatencyMs = null;
+            _pingFeedback = "زمان دریافت پاسخ تمام شد. دوباره امتحان کن.";
+        }
+        finally
+        {
+            _isPinging = false;
+            IsBusy = false;
+            OnPropertyChanged(nameof(SelectedHealthyPingText));
+            NotifyHomeChanged();
+        }
+    }
+
+    private async Task<int> RemoveOldFailedProfilesAsync()
+    {
+        if (IsConnected && string.IsNullOrEmpty(_activeProfileId)) return 0;
+        var removable = ProfileCleanupPolicy.FindRemovable(Profiles, DateTime.Now,
+            IsConnected ? _activeProfileId : null);
+        if (removable.Count == 0) return 0;
+        var ids = removable.Select(p => p.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var now = DateTime.UtcNow;
+        Settings.SuppressedProfileIds = Settings.SuppressedProfileIds
+            .Where(p => p.Value > now).ToDictionary(p => p.Key, p => p.Value);
+        foreach (var id in ids) Settings.SuppressedProfileIds[id] = now.AddDays(7);
+        // Persist suppression first, so a refresh cannot immediately re-add the
+        // same dead entries. Explicit clipboard imports remain available.
+        await _store.SaveSettingsAsync(Settings);
+        Profiles.ReplaceRange(Profiles.Where(p => !ids.Contains(p.Id)).ToList());
+        if (SelectedProfile is { } selected && ids.Contains(selected.Id)) SelectedProfile = null;
+        RefreshFilters();
+        RefreshStats();
+        CleanupSummary = $"{removable.Count:N0} سرور قدیمی و ناموفق پاک شد.";
+        return removable.Count;
+    }
+
+    private async Task ApplyAutomaticCleanupAsync()
+    {
+        if (Settings.AutoCleanupOldServers) await RemoveOldFailedProfilesAsync();
+    }
+
+    private async Task CleanupOldServersAsync()
+    {
+        IsBusy = true;
+        try
+        {
+            var removed = await RemoveOldFailedProfilesAsync();
+            if (removed > 0) await _store.SaveProfilesAsync(Profiles);
+            else CleanupSummary = "موردی برای حذف نیست؛ پاک‌سازی به ۳ شکست پیاپی، عمر ۷ روز و یک تست سالم اخیر نیاز دارد.";
+        }
+        finally { IsBusy = false; }
+    }
+
+    private async Task FindServersAsync()
+    {
+        if (!CanSearchServers) return;
+        _findingServers = true;
+        _homeNotice = "";
+        using var discovery = new CancellationTokenSource();
+        discovery.CancelAfter(TimeSpan.FromMinutes(2));
+        _discoveryCts = discovery;
+        NotifyHomeChanged();
+        try
+        {
+            var enabledSources = SubscriptionSources.Where(source => source.IsEnabled).ToList();
+            var recentSources = enabledSources.Count > 0 && enabledSources.All(source =>
+                source.Source.LastFetchedUtc >= DateTime.UtcNow.AddMinutes(-10));
+            var expiredSuppression = Settings.SuppressedProfileIds.Values.Any(until => until <= DateTime.UtcNow);
+            var recentWorkingSet = Profiles.Count(p => p.Health == ProfileHealth.Working &&
+                p.LastTested >= DateTime.Now.AddMinutes(-30)) >= SimpleSearchHealthyTarget;
+            if (Profiles.Count == 0 || (!recentSources && !recentWorkingSet) || expiredSuppression)
+                await GetConfigAsync(discovery.Token);
+            discovery.Token.ThrowIfCancellationRequested();
+            var started = DateTime.Now;
+            var candidates = ConfigTestPlanner.OrderForHealthySearch(Profiles.Where(p => p.Health != ProfileHealth.Unsupported));
+            await TestProfilesAsync(candidates, guidedHealthySearch: true, simpleSearch: true);
+            SelectedHealthyProfile = HealthyProfiles.Where(p => p.LastTested >= started)
+                .OrderBy(p => p.LatencyMs ?? int.MaxValue).FirstOrDefault() ?? SelectedHealthyProfile;
+            _homeSearchCompleted = true;
+            if (discovery.IsCancellationRequested && !HasHomeServers)
+                _homeNotice = "جست‌وجو متوقف شد. برای بررسی سرورهای بیشتر دوباره جست‌وجو کن.";
+        }
+        catch (OperationCanceledException)
+        {
+            _homeNotice = "جست‌وجو متوقف شد. هر وقت خواستی دوباره شروع کن.";
+        }
+        finally
+        {
+            _discoveryCts = null;
+            _findingServers = false;
+            NotifyHomeChanged();
+        }
+    }
     public bool IsConnectionBusy => _connectionUiPhase != ConnectionUiPhase.Idle;
     public bool IsDisconnected => !IsConnected && !IsConnectionBusy;
     public bool ShowConnectAction => !IsConnected;
@@ -211,7 +388,7 @@ public sealed class MainViewModel : ObservableObject
             ConnectionUiPhase.Disconnecting => "در حال قطع اتصال",
             _ => IsConnected ? "متصل و تأییدشده" : "قطع"
         };
-    public bool IsTesting { get => _isTesting; private set => SetProperty(ref _isTesting, value); }
+    public bool IsTesting { get => _isTesting; private set { if (SetProperty(ref _isTesting, value)) NotifyHomeChanged(); } }
     public bool IsConnected
     {
         get => _isConnected;
@@ -401,6 +578,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void RefreshConnectionActions()
     {
+        NotifyHomeChanged();
         OnPropertyChanged(nameof(IsConnectionBusy));
         OnPropertyChanged(nameof(IsDisconnected));
         OnPropertyChanged(nameof(ShowConnectAction));
@@ -433,7 +611,7 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
-        if (_initialized) return;
+        if (_initialized || IsBusy) return;
         IsBusy = true;
         StatusMessage = "در حال بارگذاری تنظیمات و کانفیگ‌ها...";
         try
@@ -492,6 +670,11 @@ public sealed class MainViewModel : ObservableObject
             }
             else
             {
+#if ANDROID
+                _activeProfileId = AndroidVpnRuntime.ConnectedProfileId;
+                if (_tunnel.IsConnected)
+                    SelectedHealthyProfile = Profiles.FirstOrDefault(p => p.Id == _activeProfileId);
+#endif
                 IsConnected = _tunnel.IsConnected;
             }
 
@@ -511,7 +694,9 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private async Task GetConfigAsync()
+    private Task GetConfigAsync() => GetConfigAsync(CancellationToken.None);
+
+    private async Task GetConfigAsync(CancellationToken cancellationToken)
     {
         var activeSources = SubscriptionSources.Where(x => x.IsEnabled).ToList();
         if (activeSources.Count == 0)
@@ -532,13 +717,16 @@ public sealed class MainViewModel : ObservableObject
             var unchanged = 0;
             var succeeded = 0;
 
-            for (var index = 0; index < activeSources.Count; index++)
+            using var fetchGate = new SemaphoreSlim(2, 2);
+            async Task FetchSourceAsync(SubscriptionSourceViewModel source)
             {
-                var source = activeSources[index];
-                StatusMessage = $"در حال دریافت {index + 1:N0} از {activeSources.Count:N0} • {source.Name}";
+                await fetchGate.WaitAsync(cancellationToken);
                 try
                 {
-                    var outcome = await FetchSubscriptionCoreAsync(source, existing);
+                    StatusMessage = $"در حال دریافت • {source.Name}";
+                    // Await continuations stay on the UI thread, where source
+                    // metadata, profile merging and aggregate counters are updated.
+                    var outcome = await FetchSubscriptionCoreAsync(source, existing, cancellationToken);
                     added += outcome.Added;
                     unchanged += outcome.NotModified ? 1 : 0;
                     succeeded++;
@@ -547,13 +735,14 @@ public sealed class MainViewModel : ObservableObject
                 {
                     failures.Add($"{source.Name}: {HumanizeException(ex)}");
                 }
+                finally { fetchGate.Release(); }
             }
-
+            await Task.WhenAll(activeSources.Select(FetchSourceAsync));
             if (succeeded > 0)
             {
                 await _store.SaveProfilesAsync(Profiles);
                 await PersistSubscriptionSettingsAsync();
-                await TryRefreshCommunityHealthAfterConfigAsync();
+                if (!_findingServers) await TryRefreshCommunityHealthAfterConfigAsync();
                 RefreshFilters();
                 RefreshStats();
             }
@@ -562,7 +751,7 @@ public sealed class MainViewModel : ObservableObject
                 ? $"دریافت کامل شد • {added:N0} کانفیگ جدید • {unchanged:N0} منبع بدون تغییر"
                 : $"{succeeded:N0} منبع دریافت شد و {failures.Count:N0} منبع خطا داشت • {added:N0} کانفیگ جدید";
 
-            if (failures.Count > 0 && Shell.Current is not null)
+            if (failures.Count > 0 && Shell.Current is not null && !_findingServers)
             {
                 var details = string.Join("\n", failures.Take(5));
                 await Shell.Current.DisplayAlert("گزارش دریافت Subscription", details, "باشه");
@@ -601,28 +790,41 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task<SubscriptionFetchOutcome> FetchSubscriptionCoreAsync(
         SubscriptionSourceViewModel item,
-        IDictionary<string, ConfigProfile> existing)
+        IDictionary<string, ConfigProfile> existing,
+        CancellationToken cancellationToken = default)
     {
         var source = item.Source;
-        var result = await _github.FetchAsync(source.Url, source.ETag);
-        source.LastFetchedUtc = DateTime.UtcNow;
-        if (!string.IsNullOrWhiteSpace(result.ETag))
-            source.ETag = result.ETag;
-        item.RefreshFetchMetadata();
+        var expiredIds = Settings.SuppressedProfileIds.Where(entry => entry.Value <= DateTime.UtcNow)
+            .Select(entry => entry.Key).ToArray();
+        var expiredSuppression = expiredIds.Length > 0;
+        if (expiredSuppression)
+        {
+            foreach (var subscription in SubscriptionSources) subscription.Source.ETag = string.Empty;
+            Settings.GitHubETag = string.Empty;
+            foreach (var id in expiredIds) Settings.SuppressedProfileIds.Remove(id);
+        }
+        var result = await _github.FetchAsync(source.Url, existing.Count == 0 || expiredSuppression ? null : source.ETag, cancellationToken);
 
         var host = Uri.TryCreate(result.SourceUrl, UriKind.Absolute, out var uri) ? uri.Host : "source";
         var route = result.UsedDirectConnection ? "direct fallback" : "system route";
         if (result.NotModified)
+        {
+            source.LastFetchedUtc = DateTime.UtcNow;
+            item.RefreshFetchMetadata();
             return new SubscriptionFetchOutcome(0, true, host, route);
+        }
 
         StatusMessage = $"{item.Name} دریافت شد؛ در حال پردازش...";
-        var extracted = await Task.Run(() => _extractor.Extract(result.Content, $"Subscription: {item.Name}").ToList());
+        var extracted = result.Profiles;
         if (extracted.Count == 0)
             throw new InvalidDataException("Subscription دریافت شد، اما هیچ کانفیگ پشتیبانی‌شده‌ای در آن پیدا نشد.");
 
         var additions = new List<ConfigProfile>();
         foreach (var profile in extracted)
         {
+            if (Settings.SuppressedProfileIds.TryGetValue(profile.Id, out var until) && until > DateTime.UtcNow)
+                continue;
+            profile.Source = $"Subscription: {item.Name}";
             if (existing.TryGetValue(profile.Id, out var old))
             {
                 old.LastSeen = DateTime.Now;
@@ -634,6 +836,12 @@ public sealed class MainViewModel : ObservableObject
         }
 
         Profiles.AddRange(additions);
+        // Commit validators only after a usable body has been imported. A mirror's
+        // validator is not valid for the original URL on the next refresh.
+        source.ETag = string.Equals(result.SourceUrl, source.Url, StringComparison.OrdinalIgnoreCase)
+            ? result.ETag : string.Empty;
+        source.LastFetchedUtc = DateTime.UtcNow;
+        item.RefreshFetchMetadata();
         return new SubscriptionFetchOutcome(additions.Count, false, host, route);
     }
 
@@ -1101,9 +1309,12 @@ public sealed class MainViewModel : ObservableObject
 
     private Task TestFilteredAsync() => TestProfilesAsync(_filteredSnapshot.ToList(), guidedHealthySearch: true);
 
-    private async Task TestProfilesAsync(IReadOnlyList<ConfigProfile> candidates, bool guidedHealthySearch = false)
+    private async Task TestProfilesAsync(IReadOnlyList<ConfigProfile> candidates, bool guidedHealthySearch = false, bool simpleSearch = false)
     {
-        if (!guidedHealthySearch || candidates.Count <= 5)
+        if (IsBusy || IsTesting) return;
+        if (guidedHealthySearch)
+            candidates = ConfigTestPlanner.OrderForHealthySearch(candidates);
+        if (!guidedHealthySearch || (candidates.Count <= 5 && !simpleSearch))
         {
             TestGoalMessage = "تست این لیست تا پایان اجرا می‌شود.";
             ProgressFullWorking = 0;
@@ -1123,14 +1334,17 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 #endif
-        _testCts?.Cancel(); _testCts?.Dispose(); _testCts = new CancellationTokenSource(); var ct = _testCts.Token;
+        _testCts?.Cancel(); _testCts?.Dispose();
+        _testCts = CancellationTokenSource.CreateLinkedTokenSource(simpleSearch ? _discoveryCts?.Token ?? CancellationToken.None : CancellationToken.None);
+        var ct = _testCts.Token;
         IsBusy = true; IsTesting = true; ProgressTotal = candidates.Count; ProgressDone = 0; ProgressWorking = 0; ProgressFailed = 0; ProgressFullWorking = 0;
-        TestGoalMessage = "هدف فعلی: پیدا کردن ۵ کانفیگ سالم؛ بعد از آن از شما می‌پرسم ادامه بدهم یا نه.";
+        TestGoalMessage = simpleSearch ? "در حال پیدا کردن ۵ سرور سالم" : "هدف فعلی: پیدا کردن ۵ کانفیگ سالم؛ بعد از آن از شما می‌پرسم ادامه بدهم یا نه.";
+        _healthySearchTarget = SimpleSearchHealthyTarget;
         var sw = Stopwatch.StartNew();
         UpdateProgress(sw, 0);
-        var tested = 0; var concurrency = Math.Min(Settings.TestConcurrency, candidates.Count);
-        var index = 0; int? healthyTarget = 5; var stoppedAfterEnough = false;
-        StatusMessage = $"در حال پیدا کردن ۵ کانفیگ سالم از بین {candidates.Count:N0} مورد...";
+        var tested = 0; var concurrency = Math.Min(Math.Clamp(Settings.TestConcurrency, 1, 64), candidates.Count);
+        IReadOnlyList<ConfigProfile> remaining = candidates; int? healthyTarget = SimpleSearchHealthyTarget; var stoppedAfterEnough = false;
+        StatusMessage = $"در حال پیدا کردن {healthyTarget} سرور سالم از بین {candidates.Count:N0} مورد...";
 
         async Task TestSkippedAsync()
         {
@@ -1142,7 +1356,7 @@ public sealed class MainViewModel : ObservableObject
             });
         }
 
-        async Task TestOneAsync(ConfigProfile profile)
+        async Task TestOneAsync(ConfigProfile profile, CancellationToken workerToken)
         {
             if (profile.Health == ProfileHealth.Unsupported)
             {
@@ -1154,60 +1368,61 @@ public sealed class MainViewModel : ObservableObject
             await MainThread.InvokeOnMainThreadAsync(() => profile.Health = ProfileHealth.Testing);
             try
             {
-                var result = await _tunnel.TestAsync(profile, Settings, ct).ConfigureAwait(false);
+                var result = await _tunnel.TestAsync(profile, Settings, workerToken).ConfigureAwait(false);
                 var newHealth = result.Success ? (result.Level == ValidationLevel.FullProxy ? ProfileHealth.Working : ProfileHealth.Reachable) : ProfileHealth.Failed;
                 var done = Interlocked.Increment(ref tested);
                 await MainThread.InvokeOnMainThreadAsync(() =>
                 {
                     profile.LatencyMs = result.LatencyMs;
                     profile.LastTested = DateTime.Now;
-                    profile.TestMessage = HumanizeTestResult(result);
+                    profile.TestMessage = FormatTestDetails(result);
                     profile.Health = newHealth;
                     if (!result.Success) profile.FailureCount++; else profile.FailureCount = 0;
                     ProgressDone++;
                     if (newHealth is ProfileHealth.Working or ProfileHealth.Reachable) ProgressWorking++;
                     if (newHealth == ProfileHealth.Working) ProgressFullWorking++;
                     else if (newHealth == ProfileHealth.Failed) ProgressFailed++;
+                    if (newHealth == ProfileHealth.Working) RefreshStats();
                     MaybeUpdateProgress(sw, done, done == ProgressTotal);
                 });
             }
             catch (OperationCanceledException)
             {
                 await MainThread.InvokeOnMainThreadAsync(() => profile.Health = old);
+                throw;
+            }
+            catch
+            {
+                await MainThread.InvokeOnMainThreadAsync(() => profile.Health = old);
+                _testCts?.Cancel();
+                throw;
             }
         }
 
         try
         {
-            while (!ct.IsCancellationRequested && index < candidates.Count)
+            await _tunnel.EnsureReadyAsync(Settings, cancellationToken: ct);
+            while (!ct.IsCancellationRequested && remaining.Count > 0)
             {
-                var batchLimit = healthyTarget is int target
-                    ? Math.Max(1, Math.Min(concurrency, target - ProgressFullWorking))
-                    : concurrency;
-                var batch = new List<ConfigProfile>(batchLimit);
-
-                while (batch.Count < batchLimit && index < candidates.Count)
-                {
-                    var profile = candidates[index++];
-                    if (profile.Health == ProfileHealth.Unsupported)
-                    {
-                        await TestSkippedAsync();
-                        continue;
-                    }
-
-                    batch.Add(profile);
-                }
-
-                if (batch.Count == 0) continue;
-
+                _healthySearchTarget = healthyTarget;
                 StatusMessage = healthyTarget is int activeTarget
-                    ? $"در حال پیدا کردن {activeTarget:N0} کانفیگ سالم؛ {ProgressFullWorking:N0} سالم تا اینجا..."
-                    : $"در حال تست همه موارد باقی‌مانده؛ {ProgressFullWorking:N0} سالم تا اینجا...";
-                await Task.WhenAll(batch.Select(TestOneAsync));
-
+                    ? $"در حال پیدا کردن {activeTarget:N0} سرور سالم…"
+                    : "در حال بررسی سرورهای باقی‌مانده…";
+                using (EndpointPrecheckService.BeginBatch())
+                {
+                    remaining = await ConcurrentTestRunner.RunAsync(remaining, concurrency, TestOneAsync,
+                        () => healthyTarget is int target && Volatile.Read(ref _progressFullWorking) >= target, ct);
+                }
+                RefreshStats();
                 if (healthyTarget is null || ProgressFullWorking < healthyTarget.Value) continue;
 
-                if (index >= candidates.Count)
+                if (simpleSearch)
+                {
+                    stoppedAfterEnough = true;
+                    break;
+                }
+
+                if (remaining.Count == 0)
                     continue;
 
                 if (healthyTarget.Value == 5)
@@ -1253,11 +1468,14 @@ public sealed class MainViewModel : ObservableObject
         finally
         {
             MaybeUpdateProgress(sw, tested, true);
+            await ApplyAutomaticCleanupAsync();
             await _store.SaveProfilesAsync(Profiles);
             RefreshFilters(); RefreshStats();
             IsTesting = false; IsBusy = false;
             StatusMessage = ct.IsCancellationRequested
                 ? $"تست متوقف شد؛ {ProgressDone}/{ProgressTotal} بررسی شد."
+                : simpleSearch
+                    ? $"جست‌وجو تمام شد؛ {ProgressFullWorking:N0} سرور سالم پیدا شد."
                 : stoppedAfterEnough
                     ? $"تست با انتخاب شما متوقف شد؛ {ProgressFullWorking:N0} کانفیگ سالم پیدا شد و {ProgressDone:N0}/{ProgressTotal:N0} مورد بررسی شد."
                     : $"تست تمام شد؛ {ProgressFullWorking:N0} سالم کامل، {ProgressWorking:N0} موفق/قابل‌دسترس و {ProgressFailed:N0} ناموفق.";
@@ -1350,9 +1568,10 @@ public sealed class MainViewModel : ObservableObject
 #endif
         _testCts?.Cancel(); _testCts?.Dispose(); _testCts = new CancellationTokenSource(); var ct = _testCts.Token;
         IsBusy = true; IsTesting = true; ProgressTotal = candidates.Count; ProgressDone = 0; ProgressWorking = 0; ProgressFailed = 0; ProgressFullWorking = 0;
+        _healthySearchTarget = null;
         var sw = Stopwatch.StartNew();
         UpdateProgress(sw, 0);
-        var next = -1; var tested = 0; var concurrency = Math.Min(Settings.TestConcurrency, candidates.Count);
+        var next = -1; var tested = 0; var concurrency = Math.Min(Math.Clamp(Settings.TestConcurrency, 1, 64), candidates.Count);
         StatusMessage = $"تست با {concurrency} Worker هم‌زمان...";
 
         async Task Worker()
@@ -1364,7 +1583,7 @@ public sealed class MainViewModel : ObservableObject
                 if (p.Health == ProfileHealth.Unsupported)
                 {
                     var skipped = Interlocked.Increment(ref tested);
-                    MainThread.BeginInvokeOnMainThread(() => { ProgressDone++; MaybeUpdateProgress(sw, skipped, false); });
+                    await MainThread.InvokeOnMainThreadAsync(() => { ProgressDone++; MaybeUpdateProgress(sw, skipped, false); });
                     continue;
                 }
                 var old = p.Health;
@@ -1377,7 +1596,7 @@ public sealed class MainViewModel : ObservableObject
                     {
                         p.LatencyMs = result.LatencyMs;
                         p.LastTested = DateTime.Now;
-                        p.TestMessage = HumanizeTestResult(result);
+                        p.TestMessage = FormatTestDetails(result);
                         p.Health = newHealth;
                         if (!result.Success) p.FailureCount++; else p.FailureCount = 0;
                         ProgressDone++;
@@ -1397,11 +1616,13 @@ public sealed class MainViewModel : ObservableObject
 
         try
         {
+            await _tunnel.EnsureReadyAsync(Settings, cancellationToken: ct);
             await Task.WhenAll(Enumerable.Range(0, concurrency).Select(_ => Worker()));
         }
         finally
         {
             MaybeUpdateProgress(sw, tested, true);
+            await ApplyAutomaticCleanupAsync();
             await _store.SaveProfilesAsync(Profiles);
             RefreshFilters(); RefreshStats();
             IsTesting = false; IsBusy = false;
@@ -1413,6 +1634,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void CancelTest()
     {
+        _discoveryCts?.Cancel();
         if (_testCts is { IsCancellationRequested: false })
         {
             _testCts.Cancel();
@@ -1435,10 +1657,16 @@ public sealed class MainViewModel : ObservableObject
         ProgressPercent = ProgressTotal == 0 ? 0 : ProgressDone * 100d / ProgressTotal;
         OnPropertyChanged(nameof(ProgressLabel));
         OnPropertyChanged(nameof(ProgressFraction));
+        OnPropertyChanged(nameof(HomeSearchProgress));
+        OnPropertyChanged(nameof(HomeHint));
         var rate = sw.Elapsed.TotalSeconds > .2 && tested > 0 ? tested / sw.Elapsed.TotalSeconds : 0;
         ProgressSpeed = rate > 0 ? $"{rate:0.0} config/s" : "در حال محاسبه...";
         var remain = Math.Max(0, ProgressTotal - ProgressDone);
-        ProgressEta = rate > 0 ? $"ETA: {TimeSpan.FromSeconds(remain / rate):hh\\:mm\\:ss}" : "ETA: -";
+        ProgressEta = _healthySearchTarget.HasValue
+            ? ProgressFullWorking >= _healthySearchTarget.Value
+                ? "سرورهای سالم آماده‌اند."
+                : "زمان پیدا شدن سرور به دسترسی شبکه بستگی دارد."
+            : rate > 0 ? $"ETA: {TimeSpan.FromSeconds(remain / rate):hh\\:mm\\:ss}" : "ETA: -";
     }
 
     private static ConfigProfile? GetConnectableProfile(ConfigProfile? profile) =>
@@ -1495,6 +1723,7 @@ public sealed class MainViewModel : ObservableObject
         attempts = attempts.Take(maxAttempts).ToList();
         var failures = new List<string>();
 
+        _homeNotice = "";
         IsBusy = true;
         try
         {
@@ -1532,6 +1761,7 @@ public sealed class MainViewModel : ObservableObject
                         profile.FailureCount = 0;
                         SelectedHealthyProfile = profile;
                         SelectedProfile = profile;
+                        _activeProfileId = profile.Id;
                         IsConnected = true;
                         StatusMessage = DeviceInfo.Platform == DevicePlatform.Android
                             ? $"VPN Android متصل و تست اینترنت تأیید شد: {profile.DisplayName}"
@@ -1545,8 +1775,6 @@ public sealed class MainViewModel : ObservableObject
                         RefreshFilters();
                         RefreshStats();
                         RefreshDiagnosticsReport();
-                        if ((DeviceInfo.Platform == DevicePlatform.Android || DeviceInfo.Platform == DevicePlatform.iOS) && Shell.Current is not null)
-                            await Shell.Current.DisplayAlert("VPN متصل شد", $"اینترنت از SaePar Tunnel تأیید شد.\n{validation.Message}", "باشه");
                         return;
                     }
 
@@ -1574,12 +1802,13 @@ public sealed class MainViewModel : ObservableObject
                 : failures[0];
             StatusMessage = "اتصال تأیید نشد؛ سرورهای جایگزین هم نتیجه ندادند.";
             ConnectionStatusMessage = summary;
+            _homeNotice = "اتصال برقرار نشد. سرور دیگری انتخاب کن یا دوباره جست‌وجو کن.";
             await _store.SaveProfilesAsync(Profiles);
             RefreshFilters();
             RefreshStats();
             RefreshDiagnosticsReport();
             if (Shell.Current is not null)
-                await Shell.Current.DisplayAlert("اتصال تأیید نشد", $"{summary}\nاز صفحه کانفیگ‌ها دوباره تست سلامت بگیر.", "باشه");
+                await Shell.Current.DisplayAlert("اتصال برقرار نشد", "سرور دیگری انتخاب کن یا دوباره جست‌وجو کن. جزئیات در بخش پیشرفته ← عیب‌یابی است.", "باشه");
         }
         finally
         {
@@ -1654,6 +1883,8 @@ public sealed class MainViewModel : ObservableObject
             StatusMessage = e.Message;
             if (e.Connected.HasValue)
             {
+                if (e.Connected.Value && !string.IsNullOrWhiteSpace(e.ProfileId))
+                    _activeProfileId = e.ProfileId;
                 IsConnected = e.Connected.Value;
                 SetConnectionUiPhase(ConnectionUiPhase.Idle);
             }
@@ -1978,6 +2209,7 @@ public sealed class MainViewModel : ObservableObject
             .ToList();
 
         HealthyProfiles.ReplaceRange(healthy);
+        NotifyHomeChanged();
         _recommendedHealthyProfile = healthy.FirstOrDefault() ?? Profiles
             .Where(IsTrustedCommunityCandidate)
             .OrderByDescending(x => x.QualityScore)
@@ -2049,6 +2281,7 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task RunSafeAsync(Func<Task> action)
     {
+        if (IsBusy) return;
         try { await action(); }
         catch (OperationCanceledException)
         {
@@ -2059,6 +2292,8 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             var friendly = HumanizeException(ex);
+            _homeNotice = friendly;
+            NotifyHomeChanged();
             StatusMessage = "خطا: " + friendly;
             if (DeviceInfo.Platform == DevicePlatform.Android) ConnectionStatusMessage = "✕ " + friendly;
             IsTesting = false;
@@ -2074,6 +2309,13 @@ public sealed class MainViewModel : ObservableObject
                 ? "این سرور اینترنت را کامل از تونل عبور داد."
                 : "سرور پاسخ داد، اما عبور کامل اینترنت از تونل تأیید نشد."
             : HumanizeProblem(result.Message);
+
+    private static string FormatTestDetails(TestResult result)
+    {
+        var summary = HumanizeTestResult(result);
+        return result.Success || summary == result.Message
+            ? summary : summary + "\n" + result.Message;
+    }
 
     private static string HumanizeException(Exception ex) => HumanizeProblem(FlattenException(ex));
 

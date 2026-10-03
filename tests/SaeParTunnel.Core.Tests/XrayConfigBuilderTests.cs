@@ -140,7 +140,8 @@ public sealed class XrayConfigBuilderTests
         Assert.Equal(1400, inbound.GetProperty("settings").GetProperty("mtu").GetInt32());
         Assert.Equal("direct", root.GetProperty("outbounds")[0].GetProperty("tag").GetString());
 
-        var rule = root.GetProperty("routing").GetProperty("rules")[0];
+        var rule = root.GetProperty("routing").GetProperty("rules").EnumerateArray()
+            .Single(x => x.GetProperty("ruleTag").GetString() == "android-whitelist-websites");
         Assert.Equal("android-whitelist-websites", rule.GetProperty("ruleTag").GetString());
         Assert.Contains("domain:example.com", Strings(rule.GetProperty("domain")));
     }
@@ -195,7 +196,8 @@ public sealed class XrayConfigBuilderTests
         Assert.Equal(1400, inbound.GetProperty("settings").GetProperty("mtu").GetInt32());
         Assert.Equal("direct", root.GetProperty("outbounds")[0].GetProperty("tag").GetString());
 
-        var rule = root.GetProperty("routing").GetProperty("rules")[0];
+        var rule = root.GetProperty("routing").GetProperty("rules").EnumerateArray()
+            .Single(x => x.GetProperty("ruleTag").GetString() == "ios-whitelist-websites");
         Assert.Equal("ios-whitelist-websites", rule.GetProperty("ruleTag").GetString());
         Assert.Contains("domain:ios.example.com", Strings(rule.GetProperty("domain")));
     }
@@ -205,6 +207,26 @@ public sealed class XrayConfigBuilderTests
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             _builder.BuildIosTun(VlessProfile(), new AppSettings(), -1));
+    }
+
+    [Theory]
+    [InlineData("windows")]
+    [InlineData("android")]
+    [InlineData("ios")]
+    public void ActivePingUsesProxyEvenWhenWhitelistDefaultsToDirect(string platform)
+    {
+        var settings = new AppSettings { EnableWhitelistRouting = true, WhitelistWebsites = new() { "example.com" } };
+        var json = platform switch
+        {
+            "android" => _builder.BuildAndroidTun(VlessProfile(), settings),
+            "ios" => _builder.BuildIosTun(VlessProfile(), settings, 17),
+            _ => _builder.Build(VlessProfile(), 10808, 10809, settings: settings)
+        };
+        using var doc = JsonDocument.Parse(json);
+        var rule = doc.RootElement.GetProperty("routing").GetProperty("rules")[0];
+        Assert.Equal("proxy", rule.GetProperty("outboundTag").GetString());
+        Assert.Contains("full:cp.cloudflare.com", Strings(rule.GetProperty("domain")));
+        Assert.Contains("full:www.gstatic.com", Strings(rule.GetProperty("domain")));
     }
 
     [Fact]

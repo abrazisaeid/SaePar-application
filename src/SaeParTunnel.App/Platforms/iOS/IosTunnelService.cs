@@ -64,12 +64,15 @@ public sealed class IosTunnelService : ITunnelService
         if (profile.Health == ProfileHealth.Unsupported)
             return new TestResult(false, null, profile.TestMessage, ValidationLevel.None);
 
-        var precheck = await _precheck.TestAsync(
-            profile,
-            settings.FastTestMode ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(4),
-            cancellationToken).ConfigureAwait(false);
-        if (!precheck.Success)
-            return precheck;
+        if (settings.FastTestMode && !string.Equals(profile.Network, "mkcp", StringComparison.OrdinalIgnoreCase))
+        {
+            var precheck = await _precheck.TestAsync(
+                profile,
+                settings.FastTestMode ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(4),
+                cancellationToken).ConfigureAwait(false);
+            if (!precheck.Success)
+                return precheck;
+        }
 
         await LibXrayTestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         string? configPath = null;
@@ -361,8 +364,7 @@ public sealed class IosTunnelService : ITunnelService
             timer.Stop();
 
             var statusCode = (int)response.StatusCode;
-            return statusCode is >= 200 and < 500 &&
-                   statusCode != (int)HttpStatusCode.ProxyAuthenticationRequired
+            return response.StatusCode == HttpStatusCode.NoContent
                 ? new TestResult(
                     true,
                     (int)timer.ElapsedMilliseconds,

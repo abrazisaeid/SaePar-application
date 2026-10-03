@@ -1,225 +1,81 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:SaeParTunnel.App.ViewModels"
+             xmlns:models="clr-namespace:SaeParTunnel.Core.Models;assembly=SaeParTunnel.Core"
              x:Class="SaeParTunnel.App.Pages.DashboardPage"
-             Title="خانه">
-    <Grid RowDefinitions="*,Auto">
-    <ScrollView Grid.Row="0">
-        <VerticalStackLayout Padding="18" Spacing="12" MaximumWidthRequest="900">
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                <VerticalStackLayout Grid.Column="0" Spacing="2">
-                    <Label Text="SaePar Tunnel" Style="{StaticResource TitleLabel}" />
-                    <Label Text="اتصال و وضعیت VPN" Style="{StaticResource SubtleLabel}" />
-                </VerticalStackLayout>
-                <ActivityIndicator Grid.Column="1"
-                                   IsRunning="{Binding IsBusy}"
-                                   IsVisible="{Binding IsBusy}"
-                                   Color="{StaticResource Accent}"
-                                   WidthRequest="34"
-                                   HeightRequest="34"
-                                   VerticalOptions="Center" />
-            </Grid>
+             x:DataType="vm:MainViewModel" Title="اتصال">
+    <ScrollView>
+        <VerticalStackLayout Padding="24,32" Spacing="24" MaximumWidthRequest="480" HorizontalOptions="Fill">
+            <VerticalStackLayout Spacing="4">
+                <Label Text="SaePar" FontSize="26" FontAttributes="Bold" FlowDirection="LeftToRight" HorizontalTextAlignment="Center" />
+                <Label Text="ساده وصل شو" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="Center" />
+            </VerticalStackLayout>
 
-            <Border Style="{StaticResource Card}">
-                <VerticalStackLayout Spacing="7">
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                        <VerticalStackLayout Grid.Column="0" Spacing="2">
-                            <Label Text="{Binding BackendTitle}" FontAttributes="Bold" FontSize="17" />
-                            <Label Text="{Binding StatusMessage}" TextColor="{StaticResource Accent}" LineBreakMode="WordWrap" />
-                        </VerticalStackLayout>
-                        <Label Grid.Column="1"
-                               Text="{Binding HealthyProfilesCountText}"
-                               TextColor="{StaticResource Success}"
-                               FontAttributes="Bold"
-                               VerticalOptions="Center" />
-                    </Grid>
-                    <Label Text="{Binding BackendNote}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
-                </VerticalStackLayout>
-            </Border>
-
-            <Border Style="{StaticResource Card}" IsVisible="{Binding CannotTunnel}" Stroke="{StaticResource Danger}">
-                <VerticalStackLayout Spacing="5">
-                    <Label Text="اتصال VPN روی این پلتفرم در دسترس نیست" TextColor="{StaticResource Danger}" FontAttributes="Bold" />
-                    <Label Text="برای این پلتفرم هنوز Backend تونل واقعی فعال نشده است." Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
-                </VerticalStackLayout>
-            </Border>
-
-            <Border Style="{StaticResource Card}">
-                <VerticalStackLayout Spacing="10">
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                        <VerticalStackLayout Grid.Column="0" Spacing="2">
-                            <Label Text="اتصال VPN" FontAttributes="Bold" FontSize="19" />
-                            <Label Text="فقط کانفیگ‌های Full-Test سالم" Style="{StaticResource SubtleLabel}" />
-                        </VerticalStackLayout>
-                        <Border Grid.Column="1"
-                                Padding="10,6"
-                                BackgroundColor="{StaticResource Surface2}"
-                                Stroke="{StaticResource Border}"
-                                StrokeThickness="1"
-                                VerticalOptions="Center">
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="8" />
-                            </Border.StrokeShape>
-                            <Border.Triggers>
-                                <DataTrigger TargetType="Border" Binding="{Binding IsConnected}" Value="True">
-                                    <Setter Property="BackgroundColor" Value="#143627" />
-                                    <Setter Property="Stroke" Value="{StaticResource Success}" />
+            <Border Style="{StaticResource Card}" Padding="24" StrokeShape="RoundRectangle 24">
+                <VerticalStackLayout Spacing="20">
+                    <Border WidthRequest="64" HeightRequest="64" StrokeThickness="0" StrokeShape="RoundRectangle 32"
+                            BackgroundColor="{StaticResource Surface2}" HorizontalOptions="Center">
+                        <Label Text="○" FontSize="36" HorizontalTextAlignment="Center" VerticalTextAlignment="Center"
+                               TextColor="{StaticResource TextSecondary}">
+                            <Label.Triggers>
+                                <DataTrigger TargetType="Label" Binding="{Binding IsConnected}" Value="True">
+                                    <Setter Property="Text" Value="✓" />
+                                    <Setter Property="TextColor" Value="{StaticResource Success}" />
                                 </DataTrigger>
-                                <DataTrigger TargetType="Border" Binding="{Binding IsConnectionBusy}" Value="True">
-                                    <Setter Property="BackgroundColor" Value="#352A12" />
-                                    <Setter Property="Stroke" Value="{StaticResource Warning}" />
-                                </DataTrigger>
-                            </Border.Triggers>
-                            <Label Text="{Binding ConnectionBadgeText}"
-                                   TextColor="{StaticResource TextSecondary}"
-                                   FontAttributes="Bold"
-                                   FontSize="13">
-                                <Label.Triggers>
-                                    <DataTrigger TargetType="Label" Binding="{Binding IsConnected}" Value="True">
-                                        <Setter Property="TextColor" Value="{StaticResource Success}" />
-                                    </DataTrigger>
-                                    <DataTrigger TargetType="Label" Binding="{Binding IsConnectionBusy}" Value="True">
-                                        <Setter Property="TextColor" Value="{StaticResource Warning}" />
-                                    </DataTrigger>
-                                </Label.Triggers>
-                            </Label>
-                        </Border>
-                    </Grid>
+                            </Label.Triggers>
+                        </Label>
+                    </Border>
+                    <Label Text="{Binding HomeConnectionTitle}" FontSize="22" FontAttributes="Bold" HorizontalTextAlignment="Center"
+                           SemanticProperties.HeadingLevel="Level1" />
+                    <Label Text="{Binding HomeHint}" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="Center" LineBreakMode="WordWrap" />
+                    <ActivityIndicator IsRunning="{Binding IsBusy}" IsVisible="{Binding IsBusy}" Color="{StaticResource Accent}" HeightRequest="24" />
 
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                        <Picker Grid.Column="0"
-                                Title="سرور سالم"
-                                ItemsSource="{Binding HealthyProfiles}"
-                                SelectedItem="{Binding SelectedHealthyProfile}"
-                                ItemDisplayBinding="{Binding PickerDisplayText}"
-                                IsEnabled="{Binding CanStartConnection}" />
-                        <Button Grid.Column="1"
-                                Text="اشتراک"
-                                Command="{Binding ShareProfileCommand}"
-                                CommandParameter="{Binding SelectedHealthyProfile}"
-                                IsEnabled="{Binding HasSelectedHealthyProfile}"
-                                VerticalOptions="Center" />
-                    </Grid>
-
-                    <Label Text="{Binding HealthySelectionSummary}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
-                    <Label Text="{Binding RecommendedProfileScoreText}" TextColor="{StaticResource Success}" FontAttributes="Bold" />
-
-                    <VerticalStackLayout Spacing="8">
-                        <Button Text="اتصال"
-                                Command="{Binding ConnectCommand}"
-                                IsVisible="{Binding ShowConnectAction}"
-                                IsEnabled="{Binding CanStartConnection}"
-                                Style="{StaticResource PrimaryButton}">
-                            <Button.Triggers>
-                                <DataTrigger TargetType="Button" Binding="{Binding IsConnectionBusy}" Value="True">
-                                    <Setter Property="BackgroundColor" Value="{StaticResource Surface2}" />
-                                    <Setter Property="TextColor" Value="{StaticResource TextSecondary}" />
-                                    <Setter Property="FontAttributes" Value="None" />
-                                    <Setter Property="Opacity" Value="0.65" />
-                                </DataTrigger>
-                            </Button.Triggers>
-                        </Button>
-                        <Button Text="قطع اتصال"
-                                Command="{Binding DisconnectCommand}"
-                                IsVisible="{Binding ShowDisconnectAction}"
-                                IsEnabled="{Binding CanStopConnection}"
-                                BackgroundColor="{StaticResource Danger}"
-                                TextColor="{StaticResource Surface0}"
-                                FontAttributes="Bold">
-                            <Button.Triggers>
-                                <DataTrigger TargetType="Button" Binding="{Binding IsConnectionBusy}" Value="True">
-                                    <Setter Property="BackgroundColor" Value="{StaticResource Surface2}" />
-                                    <Setter Property="TextColor" Value="{StaticResource TextSecondary}" />
-                                    <Setter Property="FontAttributes" Value="None" />
-                                    <Setter Property="Opacity" Value="0.65" />
-                                </DataTrigger>
-                            </Button.Triggers>
-                        </Button>
-                        <Grid ColumnDefinitions="*,*" ColumnSpacing="8" IsVisible="{Binding ShowConnectionTools}">
-                            <Button Grid.Column="0"
-                                    Text="بهترین Ping"
-                                    Command="{Binding ConnectBestCommand}"
-                                    IsEnabled="{Binding CanStartConnection}" />
-                            <Button Grid.Column="1"
-                                    Text="تست همین سرور"
-                                    Command="{Binding TestHealthySelectionCommand}"
-                                    IsEnabled="{Binding IsNotBusy}" />
+                    <VerticalStackLayout Spacing="8" IsVisible="{Binding HasHomeServers}">
+                        <Label Text="سرور" Style="{StaticResource SubtleLabel}" />
+                        <Picker Title="انتخاب سرور" ItemsSource="{Binding HealthyProfiles}"
+                                SelectedItem="{Binding SelectedHealthyProfile}" IsEnabled="{Binding CanSearchServers}"
+                                ItemDisplayBinding="{Binding DisplayName, x:DataType=models:ConfigProfile}"
+                                SemanticProperties.Description="انتخاب سرور برای اتصال" />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <Button Text="{Binding PingButtonText}" Command="{Binding PingSelectedServerCommand}"
+                                    IsEnabled="{Binding CanPingSelectedServer}" BackgroundColor="Transparent"
+                                    TextColor="{StaticResource Accent}" Padding="0,8" HorizontalOptions="Start"
+                                    SemanticProperties.Description="اندازه‌گیری دوباره پینگ سرور انتخاب‌شده" />
+                            <Label Grid.Column="1" Text="{Binding SelectedHealthyPingText}" FontSize="18" FontAttributes="Bold"
+                                   FlowDirection="LeftToRight" TextColor="{StaticResource Accent}" />
                         </Grid>
+                        <Label Text="{Binding PingFeedback}" IsVisible="{Binding HasPingFeedback}" Style="{StaticResource SubtleLabel}" />
                     </VerticalStackLayout>
 
-                    <Grid BackgroundColor="{StaticResource Surface2}" Padding="12" ColumnDefinitions="Auto,*" ColumnSpacing="8">
-                        <ActivityIndicator Grid.Column="0"
-                                           IsRunning="{Binding IsBusy}"
-                                           IsVisible="{Binding IsBusy}"
-                                           WidthRequest="22"
-                                           HeightRequest="22"
-                                           Color="{StaticResource Accent}" />
-                        <Label Grid.Column="1"
-                               Text="{Binding ConnectionStatusMessage}"
-                               LineBreakMode="WordWrap"
-                               VerticalOptions="Center" />
-                    </Grid>
-
-                    <Button Text="تنظیمات VPN اندروید"
-                            Command="{Binding OpenAndroidVpnSettingsCommand}"
-                            IsVisible="{Binding IsAndroid}"
-                            IsEnabled="{Binding IsNotBusy}" />
+                    <Button Text="اتصال" Command="{Binding ConnectCommand}" IsVisible="{Binding ShowHomeConnectAction}"
+                            IsEnabled="{Binding CanConnectHome}" HeightRequest="56" CornerRadius="16" Style="{StaticResource PrimaryButton}" />
+                    <Button Text="قطع اتصال" Command="{Binding DisconnectCommand}" IsVisible="{Binding ShowDisconnectAction}"
+                            IsEnabled="{Binding CanStopConnection}" HeightRequest="56" CornerRadius="16" Style="{StaticResource DangerButton}" />
                 </VerticalStackLayout>
             </Border>
 
-            <Label Text="دریافت، تست و مدیریت کانفیگ‌ها در تب کانفیگ‌ها انجام می‌شود."
-                   Style="{StaticResource SubtleLabel}"
-                   HorizontalTextAlignment="Center"
-                   LineBreakMode="WordWrap" />
+            <VerticalStackLayout Spacing="10" IsVisible="{Binding ShowConnectAction}">
+                <Button Text="{Binding SearchServersLabel}" Command="{Binding FindServersCommand}" IsEnabled="{Binding CanSearchServers}"
+                        HeightRequest="52" CornerRadius="16">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button" Binding="{Binding HasHomeServers}" Value="False">
+                            <Setter Property="BackgroundColor" Value="{StaticResource Accent}" />
+                            <Setter Property="TextColor" Value="#06221F" />
+                            <Setter Property="FontAttributes" Value="Bold" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+                <VerticalStackLayout Spacing="8" IsVisible="{Binding IsTesting}">
+                    <ProgressBar Progress="{Binding ProgressFraction}" ProgressColor="{StaticResource Accent}" />
+                    <Label Text="{Binding HomeSearchProgress}" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="Center" />
+                </VerticalStackLayout>
+                <Button Text="توقف جست‌وجو" Command="{Binding CancelTestCommand}" IsVisible="{Binding CanCancelHomeSearch}" BackgroundColor="Transparent" />
+                <Label Text="۵ سرور سالم پیدا می‌کنیم؛ بهترین گزینه انتخاب می‌شود."
+                       IsVisible="{Binding IsDisconnected}" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="Center" />
+            </VerticalStackLayout>
+            <Label Text="منابع و گزینه‌های بیشتر در تنظیمات پیشرفته"
+                   Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="Center" />
         </VerticalStackLayout>
     </ScrollView>
-
-    <Border Grid.Row="1"
-            BackgroundColor="{StaticResource Surface1}"
-            Stroke="{StaticResource Border}"
-            StrokeThickness="1"
-            Padding="12,10">
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" MaximumWidthRequest="900">
-            <VerticalStackLayout Grid.Column="0" Spacing="1" VerticalOptions="Center">
-                <Label Text="{Binding ConnectionBadgeText}" FontAttributes="Bold" />
-                <Label Text="{Binding ConnectionStatusMessage}"
-                       Style="{StaticResource SubtleLabel}"
-                       LineBreakMode="TailTruncation"
-                       MaxLines="1" />
-            </VerticalStackLayout>
-            <Button Grid.Column="1"
-                    Text="اتصال"
-                    Command="{Binding ConnectCommand}"
-                    IsVisible="{Binding ShowConnectAction}"
-                    IsEnabled="{Binding CanStartConnection}"
-                    Style="{StaticResource PrimaryButton}">
-                <Button.Triggers>
-                    <DataTrigger TargetType="Button" Binding="{Binding IsConnectionBusy}" Value="True">
-                        <Setter Property="BackgroundColor" Value="{StaticResource Surface2}" />
-                        <Setter Property="TextColor" Value="{StaticResource TextSecondary}" />
-                        <Setter Property="FontAttributes" Value="None" />
-                        <Setter Property="Opacity" Value="0.65" />
-                    </DataTrigger>
-                </Button.Triggers>
-            </Button>
-            <Button Grid.Column="1"
-                    Text="قطع اتصال"
-                    Command="{Binding DisconnectCommand}"
-                    IsVisible="{Binding ShowDisconnectAction}"
-                    IsEnabled="{Binding CanStopConnection}"
-                    BackgroundColor="{StaticResource Danger}"
-                    TextColor="{StaticResource Surface0}"
-                    FontAttributes="Bold">
-                <Button.Triggers>
-                    <DataTrigger TargetType="Button" Binding="{Binding IsConnectionBusy}" Value="True">
-                        <Setter Property="BackgroundColor" Value="{StaticResource Surface2}" />
-                        <Setter Property="TextColor" Value="{StaticResource TextSecondary}" />
-                        <Setter Property="FontAttributes" Value="None" />
-                        <Setter Property="Opacity" Value="0.65" />
-                    </DataTrigger>
-                </Button.Triggers>
-            </Button>
-        </Grid>
-    </Border>
-    </Grid>
 </ContentPage>

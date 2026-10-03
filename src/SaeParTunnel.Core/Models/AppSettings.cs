@@ -2,7 +2,7 @@ namespace SaeParTunnel.Core.Models;
 
 public sealed class AppSettings
 {
-    public int DataSchemaVersion { get; set; } = 26;
+    public int DataSchemaVersion { get; set; } = 27;
     public string XrayPath { get; set; } = string.Empty;
     public int SocksPort { get; set; } = 10808;
     public int HttpPort { get; set; } = 10809;
@@ -10,6 +10,8 @@ public sealed class AppSettings
     public bool EnableSystemProxy { get; set; } = true;
     public bool AutoTestNewProfiles { get; set; } = false;
     public bool RemoveDuplicates { get; set; } = true;
+    public bool AutoCleanupOldServers { get; set; } = true;
+    public Dictionary<string, DateTime> SuppressedProfileIds { get; set; } = new();
     public int TestConcurrency { get; set; } = 0;
     public bool FastTestMode { get; set; } = true;
     public bool QuickMode { get; set; } = true;

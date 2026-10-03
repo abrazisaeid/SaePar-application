@@ -207,7 +207,7 @@ public sealed class XrayConfigBuilder
         // traffic into the VPN like any other packet; keeping it on the proxy path
         // avoids ISP-side filtering and hijacking. The platform runtime separately
         // keeps libXray's internal resolver outside the tunnel.
-        var rules = new List<object>();
+        var rules = new List<object> { BuildProbeRoutingRule() };
 
         if (websiteWhitelistEnabled)
         {
@@ -281,7 +281,7 @@ public sealed class XrayConfigBuilder
 
     private static object BuildWhitelistRouting(AppSettings settings)
     {
-        var rules = new List<object> { BuildPrivateNetworkRule() };
+        var rules = new List<object> { BuildProbeRoutingRule(), BuildPrivateNetworkRule() };
 
         var processes = settings.WhitelistApplications
             .Where(x => x is not null && !string.IsNullOrWhiteSpace(x.ExecutablePath))
@@ -328,6 +328,14 @@ public sealed class XrayConfigBuilder
     {
         domainStrategy = "AsIs",
         rules = new[] { BuildPrivateNetworkRule() }
+    };
+
+    private static object BuildProbeRoutingRule() => new
+    {
+        type = "field",
+        domain = new[] { "full:cp.cloudflare.com", "full:www.gstatic.com", "full:www.msftconnecttest.com" },
+        outboundTag = "proxy",
+        ruleTag = "connection-probes"
     };
 
     private static object BuildPrivateNetworkRule() => new

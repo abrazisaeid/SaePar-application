@@ -41,11 +41,21 @@ public sealed class MauiJsonStore
     {
         EnsureCreated();
         var settings = await ReadAsync<AppSettings>(SettingsPath) ?? new AppSettings();
+        var refreshValidators = settings.DataSchemaVersion < 27;
         var shouldSave = settings.DataSchemaVersion < new AppSettings().DataSchemaVersion;
         settings.DataSchemaVersion = Math.Max(settings.DataSchemaVersion, new AppSettings().DataSchemaVersion);
         settings.WhitelistApplications ??= new List<WhitelistApplication>();
         settings.WhitelistWebsites ??= new List<string>();
+        settings.SuppressedProfileIds ??= new Dictionary<string, DateTime>();
         shouldSave |= SubscriptionCatalog.Normalize(settings);
+        if (refreshValidators)
+        {
+            // Re-fetch entries previously lost to incomplete profile identity,
+            // and discard validators saved before successful body validation.
+            foreach (var source in settings.Subscriptions) source.ETag = string.Empty;
+            settings.GitHubETag = string.Empty;
+            settings.CommunityHealthETag = string.Empty;
+        }
         settings.CommunityHealthIndexUrl ??= string.Empty;
         settings.CommunityHealthETag ??= string.Empty;
 #if WINDOWS
@@ -61,17 +71,39 @@ public sealed class MauiJsonStore
     }
 
     public Task SaveSettingsAsync(AppSettings settings) => WriteAsync(SettingsPath, settings);
-    public async Task<List<ConfigProfile>> LoadProfilesAsync() => await ReadAsync<List<ConfigProfile>>(ProfilesPath) ?? new();
+    public async Task<List<ConfigProfile>> LoadProfilesAsync()
+    {
+        var profiles = await ReadAsync<List<ConfigProfile>>(ProfilesPath) ?? new();
+        return await Task.Run(() =>
+        {
+            var parser = new ConfigParser();
+            foreach (var profile in profiles)
+            {
+                profile.Id = ConfigParser.ComputeId(profile);
+                // Older caches predate the engine's removed-feature checks.
+                var parsed = string.IsNullOrWhiteSpace(profile.OriginalUri)
+                    ? null : parser.Parse(profile.OriginalUri, profile.Source, out _);
+                if (parsed?.Health == ProfileHealth.Unsupported)
+                {
+                    profile.Health = ProfileHealth.Unsupported;
+                    profile.TestMessage = parsed.TestMessage;
+                }
+                if (profile.Health == ProfileHealth.Testing)
+                    profile.Health = ProfileHealth.Untested;
+            }
+            return profiles.DistinctBy(p => p.Id).ToList();
+        });
+    }
     public Task SaveProfilesAsync(IEnumerable<ConfigProfile> profiles) => WriteAsync(ProfilesPath, profiles.ToList());
 
     private async Task<T?> ReadAsync<T>(string path)
     {
-        await _gate.WaitAsync();
+        await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
             if (!File.Exists(path)) return default;
             await using var stream = File.OpenRead(path);
-            return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions);
+            return await Task.Run(async () => await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions)).ConfigureAwait(false);
         }
         catch { return default; }
         finally { _gate.Release(); }
@@ -79,13 +111,13 @@ public sealed class MauiJsonStore
 
     private async Task WriteAsync<T>(string path, T value)
     {
-        await _gate.WaitAsync();
+        await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var temp = path + ".tmp";
             await using (var stream = File.Create(temp))
-                await JsonSerializer.SerializeAsync(stream, value, JsonOptions);
+                await Task.Run(async () => await JsonSerializer.SerializeAsync(stream, value, JsonOptions)).ConfigureAwait(false);
             File.Move(temp, path, true);
         }
         finally { _gate.Release(); }

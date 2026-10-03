@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="SaeParTunnel.App.Pages.WhitelistPage" Title="Whitelist">
+             Shell.NavBarIsVisible="True" x:Class="SaeParTunnel.App.Pages.WhitelistPage" Title="برنامه‌ها و سایت‌ها">
     <ScrollView>
         <VerticalStackLayout Padding="20" Spacing="16" MaximumWidthRequest="1000">
-            <Label Text="Whitelist / Split Tunneling" Style="{StaticResource TitleLabel}" />
+            <Label Text="برنامه‌ها و سایت‌های منتخب" Style="{StaticResource TitleLabel}" />
             <Border Style="{StaticResource Card}">
                 <Grid ColumnDefinitions="*,Auto">
                     <VerticalStackLayout>

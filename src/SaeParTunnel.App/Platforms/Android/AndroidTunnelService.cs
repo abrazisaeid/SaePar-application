@@ -61,12 +61,15 @@ public sealed class AndroidTunnelService : ITunnelService
 
         // Cheap endpoint rejection first; this keeps dead subscription entries from
         // paying the native Xray startup cost.
-        var precheck = await _precheck.TestAsync(
-            profile,
-            settings.FastTestMode ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(4),
-            cancellationToken).ConfigureAwait(false);
-        if (!precheck.Success)
-            return precheck;
+        if (settings.FastTestMode && !string.Equals(profile.Network, "mkcp", StringComparison.OrdinalIgnoreCase))
+        {
+            var precheck = await _precheck.TestAsync(
+                profile,
+                settings.FastTestMode ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(4),
+                cancellationToken).ConfigureAwait(false);
+            if (!precheck.Success)
+                return precheck;
+        }
 
         await LibXrayTestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         string? path = null;
@@ -115,13 +118,31 @@ public sealed class AndroidTunnelService : ITunnelService
         }
     }
 
-    public Task<TestResult> TestCurrentConnectionAsync(
+    public async Task<TestResult> TestCurrentConnectionAsync(
         AppSettings settings,
         CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(IsConnected
-            ? new TestResult(true, null, "VPN Android فعال است و تست اینترنت تأیید شده است.", ValidationLevel.FullProxy)
-            : new TestResult(false, null, "VPN Android متصل نیست.", ValidationLevel.None));
+        if (!IsConnected)
+            return new TestResult(false, null, "VPN Android متصل نیست.", ValidationLevel.None);
+
+        // The app is included in the VPN. Probe domains are explicitly routed
+        // through the proxy even when website whitelisting is enabled.
+        using var handler = new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false };
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+        foreach (var endpoint in new[] { "https://cp.cloudflare.com/generate_204", "https://www.gstatic.com/generate_204" })
+        {
+            try
+            {
+                var watch = Stopwatch.StartNew();
+                using var response = await client.GetAsync(endpoint, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                    .ConfigureAwait(false);
+                if (response.StatusCode == HttpStatusCode.NoContent)
+                    return new TestResult(true, (int)watch.ElapsedMilliseconds, "پاسخ اینترنت از اتصال فعال دریافت شد.", ValidationLevel.FullProxy);
+            }
+            catch (System.OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex) when (ex is HttpRequestException or System.OperationCanceledException) { }
+        }
+        return new TestResult(false, null, "اتصال فعال به درخواست پینگ پاسخ نداد.", ValidationLevel.FullProxy);
     }
 
     public async Task ConnectAsync(

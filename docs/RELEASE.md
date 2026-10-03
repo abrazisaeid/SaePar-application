@@ -7,6 +7,12 @@ GitHub Releases can contain these downloadable assets:
 - `SaeParTunnel-<version>-ios.ipa` when Apple signing is configured
 - `SHA256SUMS.txt`
 
+The Windows ZIP is a self-contained x64 application. Extract the entire archive
+and run `SaeParTunnel.App.exe`; keep the DLLs and other files beside the EXE.
+The package includes the verified official Xray v26.7.28 runtime and its license,
+so the first search does not require a separate engine download. Android APKs
+support Android 7.0+ on arm64 and x86_64 devices.
+
 Do not commit release binaries, certificates, provisioning profiles, keystores or passwords to the repository.
 
 ## Android and Windows local packaging
@@ -41,7 +47,7 @@ Install the certificate and profiles on the Mac, then run:
 export IOS_SIGNING_KEY='Apple Distribution: Example Company (TEAMID)'
 export IOS_APP_PROVISIONING_PROFILE='APP_PROFILE_UUID'
 export IOS_EXTENSION_PROVISIONING_PROFILE='EXTENSION_PROFILE_UUID'
-./scripts/package-ios.sh v2.0.21
+./scripts/package-ios.sh v2.0.22
 ```
 
 Set `IOS_SIGNING_KEYCHAIN` when the certificate is in a custom keychain. The script restores the pinned libXray framework, builds for `ios-arm64`, creates the IPA and verifies its archive, bundle IDs, Packet Tunnel extension, embedded profiles and code signature.
@@ -59,7 +65,7 @@ Before publishing assets:
 - On a physical iPhone, approve VPN permission and verify the UI remains disconnected until the tunnel internet test succeeds.
 - Confirm public web traffic uses the selected profile while local IPv4/IPv6 services remain reachable.
 - Verify Connect becomes disabled and Disconnect becomes prominent only after validation succeeds.
-- Run guided config testing and confirm the healthy-profile checkpoints behave at 5, 10 and the selected final count.
+- Run the simple search and confirm it stops after finding five validated healthy profiles. Check cancellation and the advanced full-test controls separately.
 - Confirm Dashboard, Configs, Settings and Diagnostics show one consistent connection state.
 
 ## GitHub secrets
@@ -103,9 +109,9 @@ The workflow checks both bundle IDs, the Packet Tunnel entitlement and the Apple
 Update the app and extension versions first, then create and push the matching tag:
 
 ```powershell
-git tag -a v2.0.21 -m "SaePar Tunnel v2.0.21"
+git tag -a v2.0.22 -m "SaePar Tunnel v2.0.22"
 git push origin main
-git push origin v2.0.21
+git push origin v2.0.22
 ```
 
 The `Release` workflow builds Android and Windows on a Windows runner, validates iOS on a macOS runner, optionally creates the signed IPA, regenerates one checksum manifest and then creates or updates the GitHub Release.

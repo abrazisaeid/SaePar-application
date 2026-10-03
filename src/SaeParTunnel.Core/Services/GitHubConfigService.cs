@@ -12,6 +12,7 @@ public sealed class GitHubConfigFetchResult
     public DateTimeOffset? LastModified { get; set; }
     public string SourceUrl { get; set; } = string.Empty;
     public bool UsedDirectConnection { get; set; }
+    public IReadOnlyList<ConfigProfile> Profiles { get; set; } = Array.Empty<ConfigProfile>();
 }
 
 public sealed class GitHubConfigService : IDisposable
@@ -28,18 +29,28 @@ public sealed class GitHubConfigService : IDisposable
 
     private readonly HttpClient _systemProxyClient;
     private readonly HttpClient _directClient;
+    private readonly TimeSpan _attemptTimeout;
+    private const int MaxContentBytes = 32 * 1024 * 1024;
 
-    public GitHubConfigService()
+    public GitHubConfigService() : this(
+        new HttpClientHandler { UseProxy = true },
+        new HttpClientHandler { UseProxy = false })
     {
-        _systemProxyClient = CreateClient(new HttpClientHandler { UseProxy = true });
-        _directClient = CreateClient(new HttpClientHandler { UseProxy = false });
+    }
+
+    public GitHubConfigService(HttpMessageHandler systemHandler, HttpMessageHandler directHandler,
+        TimeSpan? attemptTimeout = null)
+    {
+        _systemProxyClient = CreateClient(systemHandler);
+        _directClient = CreateClient(directHandler);
+        _attemptTimeout = attemptTimeout ?? TimeSpan.FromSeconds(15);
     }
 
     private static HttpClient CreateClient(HttpMessageHandler handler)
     {
         var client = new HttpClient(handler)
         {
-            Timeout = TimeSpan.FromSeconds(45)
+            Timeout = Timeout.InfiniteTimeSpan
         };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("SaeParTunnel/2.0-preview12");
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("text/plain"));
@@ -62,25 +73,32 @@ public sealed class GitHubConfigService : IDisposable
 
         foreach (var candidate in candidates)
         {
-            // First respect the Windows/system proxy. If a stale/broken proxy is the
-            // reason for TLS failure, retry the exact same URL without system proxy.
-            foreach (var mode in new[] { (Client: _systemProxyClient, Direct: false), (Client: _directClient, Direct: true) })
+            // A stale system proxy must not hold up a working direct route.
+            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            attemptCts.CancelAfter(_attemptTimeout);
+            var pending = new[] { (Client: _systemProxyClient, Direct: false), (Client: _directClient, Direct: true) }
+                .Select(mode => FetchOneAsync(mode.Client, candidate,
+                    string.Equals(candidate, requestedUrl, StringComparison.OrdinalIgnoreCase) ? previousETag : null,
+                    mode.Direct, attemptCts.Token)).ToList();
+            try
             {
-                try
+                while (pending.Count > 0)
                 {
-                    var etag = string.Equals(candidate, requestedUrl, StringComparison.OrdinalIgnoreCase)
-                        ? previousETag
-                        : null;
-                    return await FetchOneAsync(mode.Client, candidate, etag, mode.Direct, cancellationToken);
+                    var completed = await Task.WhenAny(pending).ConfigureAwait(false);
+                    pending.Remove(completed);
+                    try { return await completed.ConfigureAwait(false); }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                    catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException)
+                    {
+                        errors.Add($"{new Uri(candidate).Host}: {FlattenException(ex)}");
+                    }
                 }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
-                {
-                    errors.Add($"{new Uri(candidate).Host} ({(mode.Direct ? "direct" : "system proxy")}): {FlattenException(ex)}");
-                }
+            }
+            finally
+            {
+                attemptCts.Cancel();
+                try { await Task.WhenAll(pending).ConfigureAwait(false); }
+                catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException) { }
             }
         }
 
@@ -121,9 +139,17 @@ public sealed class GitHubConfigService : IDisposable
         }
 
         response.EnsureSuccessStatusCode();
+        // ResponseHeadersRead does not put a deadline on reading the body.
+        // The attempt token covers both stages and the size limit bounds memory use.
+        await response.Content.LoadIntoBufferAsync(MaxContentBytes, cancellationToken).ConfigureAwait(false);
         var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(content))
             throw new HttpRequestException("منبع پاسخ خالی برگرداند.");
+
+        var profiles = await Task.Run(() => new ConfigExtractor(new ConfigParser()).Extract(content, string.Empty),
+            cancellationToken).ConfigureAwait(false);
+        if (profiles.Count == 0)
+            throw new HttpRequestException("پاسخ منبع هیچ لینک کانفیگ معتبری ندارد؛ مسیر جایگزین بررسی می‌شود.");
 
         return new GitHubConfigFetchResult
         {
@@ -132,7 +158,8 @@ public sealed class GitHubConfigService : IDisposable
             ETag = response.Headers.ETag?.ToString() ?? string.Empty,
             LastModified = response.Content.Headers.LastModified,
             SourceUrl = url,
-            UsedDirectConnection = direct
+            UsedDirectConnection = direct,
+            Profiles = profiles
         };
     }
 
