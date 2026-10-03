@@ -5,6 +5,7 @@ using Android.Content.PM;
 using Android.Net;
 using Android.OS;
 using Com.Saepar.Tunnel.Bridge;
+using SaeParTunnel.Core.Services;
 
 namespace SaeParTunnel.App.Platforms.Android;
 
@@ -17,7 +18,7 @@ public sealed class SaeParVpnService : VpnService
 {
     public const string ActionConnect = "com.saepar.tunnel.action.CONNECT";
     public const string ActionDisconnect = "com.saepar.tunnel.action.DISCONNECT";
-    public const string ExtraXrayJson = "xray_json";
+    public const string ExtraConfigToken = "config_token";
     public const string ExtraProfileId = "profile_id";
     public const string ExtraProfileName = "profile_name";
     public const string ExtraAllowedPackages = "allowed_packages";
@@ -58,12 +59,12 @@ public sealed class SaeParVpnService : VpnService
         PromoteToForeground("در حال برقراری VPN...");
         AndroidVpnRuntime.ReportStatus("service-running", "سرویس VPN اجرا شد؛ در حال آماده‌سازی رابط TUN...");
 
-        var xrayJson = intent?.GetStringExtra(ExtraXrayJson) ?? string.Empty;
+        var configToken = intent?.GetStringExtra(ExtraConfigToken) ?? string.Empty;
         var profileId = intent?.GetStringExtra(ExtraProfileId) ?? string.Empty;
         var profileName = intent?.GetStringExtra(ExtraProfileName) ?? "SaePar Tunnel";
         var allowedPackages = intent?.GetStringArrayExtra(ExtraAllowedPackages) ?? Array.Empty<string>();
 
-        _ = Task.Run(() => StartTunnelAsync(xrayJson, profileId, profileName, allowedPackages));
+        _ = Task.Run(() => StartTunnelAsync(configToken, profileId, profileName, allowedPackages));
         return StartCommandResult.NotSticky;
     }
 
@@ -84,13 +85,17 @@ public sealed class SaeParVpnService : VpnService
         base.OnDestroy();
     }
 
-    private async Task StartTunnelAsync(string xrayJson, string profileId, string profileName, string[] allowedPackages)
+    private async Task StartTunnelAsync(string configToken, string profileId, string profileName, string[] allowedPackages)
     {
         await _lifecycleGate.WaitAsync().ConfigureAwait(false);
         try
         {
             _stopping = false;
             await StopCoreAndInterfaceOnlyAsync().ConfigureAwait(false);
+
+            var configStore = new TunnelConfigurationStore(Path.Combine(
+                Microsoft.Maui.Storage.FileSystem.CacheDirectory, "vpn-start"));
+            var xrayJson = await configStore.ConsumeAsync(configToken).ConfigureAwait(false);
 
             if (string.IsNullOrWhiteSpace(xrayJson))
                 throw new InvalidOperationException("Android Xray configuration is empty.");
@@ -101,7 +106,9 @@ public sealed class SaeParVpnService : VpnService
             // Keep the first production tunnel IPv4-only until the data path is proven.
             const string tunAddress = "198.18.0.1";
             const string tunDns = "8.8.8.8";
-            const int tunMtu = 1500;
+            const int tunMtu = 1400;
+            // Capture before Establish changes ActiveNetwork to our own VPN.
+            var physicalDns = GetPhysicalDnsServers()[0];
 
             AndroidVpnRuntime.ReportStatus(
                 "dns-selected",
@@ -175,7 +182,7 @@ public sealed class SaeParVpnService : VpnService
             // libXray's own resolver must bypass the VPN to prevent a recursion loop.
             // OneXray uses the configured TUN DNS here and protects the resulting DNS
             // socket with VpnService.protect().
-            SaeParXrayBridge.AttachTun(this, _vpnInterface, $"{tunDns}:53");
+            SaeParXrayBridge.AttachTun(this, _vpnInterface, FormatDnsEndpoint(physicalDns));
 
             // IMPORTANT: pass the *actual* Android TUN descriptor through Xray's
             // per-config env map. This remains correct even if libXray/Go was already
@@ -219,7 +226,8 @@ public sealed class SaeParVpnService : VpnService
 
             await StopCoreAndInterfaceOnlyAsync().ConfigureAwait(false);
             AndroidVpnRuntime.SignalError(
-                $"تست اینترنت از VPN تأیید نشد • fd={tunFd} • TUN={tunAddress}/32 • DNS={tunDns}: " + validation.Message);
+                $"تست اینترنت از VPN تأیید نشد • fd={tunFd} • TUN={tunAddress}/32 • DNS={tunDns}: " + validation.Message,
+                startupFailure: false);
             StopForeground(StopForegroundFlags.Remove);
             StopSelf();
         }
@@ -327,7 +335,7 @@ public sealed class SaeParVpnService : VpnService
                 HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
 
             var code = (int)response.StatusCode;
-            return code >= 200 && code < 500
+            return code == 204
                 ? (true, $"{host}=HTTP {code}")
                 : (false, $"{host}=HTTP {code}");
         }

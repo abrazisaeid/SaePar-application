@@ -30,8 +30,10 @@ internal static class AndroidVpnRuntime
         {
             _lastError = string.Empty;
             _startWaiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            cancellationToken.Register(() => _startWaiter?.TrySetCanceled(cancellationToken));
-            return _startWaiter.Task;
+            var waiter = _startWaiter;
+            var registration = cancellationToken.Register(() => waiter.TrySetCanceled(cancellationToken));
+            _ = waiter.Task.ContinueWith(_ => registration.Dispose(), TaskScheduler.Default);
+            return waiter.Task;
         }
     }
 
@@ -40,8 +42,10 @@ internal static class AndroidVpnRuntime
         lock (Gate)
         {
             _stopWaiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            cancellationToken.Register(() => _stopWaiter?.TrySetCanceled(cancellationToken));
-            return _stopWaiter.Task;
+            var waiter = _stopWaiter;
+            var registration = cancellationToken.Register(() => waiter.TrySetCanceled(cancellationToken));
+            _ = waiter.Task.ContinueWith(_ => registration.Dispose(), TaskScheduler.Default);
+            return waiter.Task;
         }
     }
 
@@ -97,7 +101,7 @@ internal static class AndroidVpnRuntime
         try { handler?.Invoke(null, args); } catch { }
     }
 
-    public static void SignalError(string message)
+    public static void SignalError(string message, bool startupFailure = true)
     {
         EventHandler<AndroidVpnStatusEventArgs>? handler;
         AndroidVpnStatusEventArgs args;
@@ -107,7 +111,9 @@ internal static class AndroidVpnRuntime
             _connectedProfileId = string.Empty;
             _lastError = message ?? "Android VPN failed.";
             _statusMessage = "خطای VPN Android: " + _lastError;
-            _startWaiter?.TrySetException(new InvalidOperationException(_lastError));
+            _startWaiter?.TrySetException(startupFailure
+                ? new SaeParTunnel.Core.Models.TunnelStartupException(_lastError)
+                : new SaeParTunnel.Core.Models.TunnelValidationException(_lastError));
             _startWaiter = null;
             _stopWaiter?.TrySetResult(true);
             _stopWaiter = null;
@@ -115,6 +121,15 @@ internal static class AndroidVpnRuntime
             args = new AndroidVpnStatusEventArgs("error", _statusMessage, false);
         }
         try { handler?.Invoke(null, args); } catch { }
+    }
+
+    public static void CancelStartWait()
+    {
+        lock (Gate)
+        {
+            _startWaiter?.TrySetCanceled();
+            _startWaiter = null;
+        }
     }
 }
 #endif

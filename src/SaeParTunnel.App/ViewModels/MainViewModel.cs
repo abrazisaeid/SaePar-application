@@ -1788,6 +1788,7 @@ public sealed class MainViewModel : ObservableObject
         var maxAttempts = Settings.AutoReconnect ? Math.Clamp(Settings.AutoReconnectAttempts, 1, 5) : 1;
         attempts = attempts.Take(maxAttempts).ToList();
         var failures = new List<string>();
+        var startupFailed = false;
 
         _homeNotice = "";
         IsBusy = true;
@@ -1859,6 +1860,11 @@ public sealed class MainViewModel : ObservableObject
                     failures.Add($"{profile.DisplayName}: {friendly}");
                     MarkConnectionAttemptFailed(profile, friendly);
                     try { await _tunnel.DisconnectAsync(Settings); } catch { }
+                    if (!ConnectionAttemptPolicy.ShouldTryAnotherServer(ex))
+                    {
+                        startupFailed = true;
+                        break;
+                    }
                 }
             }
 
@@ -1866,15 +1872,19 @@ public sealed class MainViewModel : ObservableObject
             var summary = failures.Count == 0
                 ? "هیچ سرور سالمی برای تلاش بعدی باقی نماند."
                 : failures[0];
-            StatusMessage = "اتصال تأیید نشد؛ سرورهای جایگزین هم نتیجه ندادند.";
+            StatusMessage = startupFailed
+                ? "VPN روی گوشی راه‌اندازی یا تأیید نشد؛ سرورهای پیدا‌شده حفظ شدند."
+                : "اتصال تأیید نشد؛ سرورهای پیدا‌شده برای تلاش دوباره حفظ شدند.";
             ConnectionStatusMessage = summary;
-            _homeNotice = "اتصال برقرار نشد. سرور دیگری انتخاب کن یا دوباره جست‌وجو کن.";
+            _homeNotice = startupFailed
+                ? "راه‌اندازی VPN تأیید نشد. جزئیات خطا در پیشرفته ← عیب‌یابی است."
+                : "اتصال برقرار نشد. دوباره تلاش کن یا پینگ همین سرور را بگیر.";
             await _store.SaveProfilesAsync(Profiles);
             RefreshFilters();
             RefreshStats();
             RefreshDiagnosticsReport();
             if (Shell.Current is not null)
-                await Shell.Current.DisplayAlert("اتصال برقرار نشد", "سرور دیگری انتخاب کن یا دوباره جست‌وجو کن. جزئیات در بخش پیشرفته ← عیب‌یابی است.", "باشه");
+                await Shell.Current.DisplayAlert("اتصال برقرار نشد", summary + "\n\nسرورهای پیدا‌شده حفظ شدند. جزئیات در پیشرفته ← عیب‌یابی است.", "باشه");
         }
         finally
         {
@@ -1899,10 +1909,7 @@ public sealed class MainViewModel : ObservableObject
 
     private static void MarkConnectionAttemptFailed(ConfigProfile profile, string message)
     {
-        profile.Health = ProfileHealth.Failed;
-        profile.LastTested = DateTime.Now;
-        profile.TestMessage = message;
-        profile.FailureCount++;
+        ConnectionAttemptPolicy.RecordFailure(profile, message);
     }
 
     private async Task ConnectBestAsync()
@@ -2423,7 +2430,15 @@ public sealed class MainViewModel : ObservableObject
             ? summary : summary + "\n" + result.Message;
     }
 
-    private static string HumanizeException(Exception ex) => HumanizeProblem(FlattenException(ex));
+    private static string HumanizeException(Exception ex)
+    {
+        var message = FlattenException(ex);
+        // Keep the actual Android stage/error. Generic text previously hid Binder
+        // and TUN failures behind an unrelated permission or bad-server message.
+        if (ex is TunnelStartupException or TunnelValidationException)
+            return message.Length <= 400 ? message : message[..400] + "...";
+        return HumanizeProblem(message);
+    }
 
     private static string HumanizeProblem(string message)
     {

@@ -150,6 +150,21 @@ public sealed class AndroidTunnelService : ITunnelService
         AppSettings settings,
         CancellationToken cancellationToken = default)
     {
+        try { await StartVpnAsync(profile, settings, cancellationToken); }
+        catch (System.OperationCanceledException) { throw; }
+        catch (TunnelStartupException) { throw; }
+        catch (TunnelValidationException) { throw; }
+        catch (Exception ex)
+        {
+            throw new TunnelStartupException("راه‌اندازی VPN اندروید انجام نشد: " + ex.Message, ex);
+        }
+    }
+
+    private async Task StartVpnAsync(
+        ConfigProfile profile,
+        AppSettings settings,
+        CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         await EnsureReadyAsync(settings, cancellationToken: cancellationToken);
 
@@ -199,23 +214,23 @@ public sealed class AndroidTunnelService : ITunnelService
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(25));
+        var configStore = new TunnelConfigurationStore(Path.Combine(FileSystem.CacheDirectory, "vpn-start"));
+        var configToken = await configStore.WriteAsync(xrayJson, cancellationToken);
         var wait = AndroidVpnRuntime.PrepareStartWaitAsync(timeoutCts.Token);
-
         var intent = new Intent(activity, typeof(SaeParVpnService));
         intent.SetAction(SaeParVpnService.ActionConnect);
-        intent.PutExtra(SaeParVpnService.ExtraXrayJson, xrayJson);
+        intent.PutExtra(SaeParVpnService.ExtraConfigToken, configToken);
         intent.PutExtra(SaeParVpnService.ExtraProfileId, profile.Id);
         intent.PutExtra(SaeParVpnService.ExtraProfileName, profile.DisplayName);
         intent.PutExtra(SaeParVpnService.ExtraAllowedPackages, allowedPackages);
 
-        AndroidVpnRuntime.ReportStatus("service-start", "سرویس VPN شروع شد؛ در حال ساخت TUN و راه‌اندازی Xray...");
-        if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
-            activity.StartForegroundService(intent);
-        else
-            activity.StartService(intent);
-
         try
         {
+            AndroidVpnRuntime.ReportStatus("service-start", "در حال شروع سرویس VPN و راه‌اندازی Xray...");
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
+                activity.StartForegroundService(intent);
+            else
+                activity.StartService(intent);
             await wait.ConfigureAwait(false);
         }
         catch (System.OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -224,6 +239,13 @@ public sealed class AndroidTunnelService : ITunnelService
             stopIntent.SetAction(SaeParVpnService.ActionDisconnect);
             activity.StartService(stopIntent);
             throw new TimeoutException("راه‌اندازی و تست اینترنت VPN Android بیشتر از 25 ثانیه طول کشید.");
+        }
+        finally
+        {
+            AndroidVpnRuntime.CancelStartWait();
+            // Observe the waiter even when StartForegroundService itself throws.
+            try { await wait.ConfigureAwait(false); } catch { }
+            configStore.Delete(configToken);
         }
     }
 
