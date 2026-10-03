@@ -55,7 +55,7 @@ Install the certificate and profiles on the Mac, then run:
 export IOS_SIGNING_KEY='Apple Distribution: Example Company (TEAMID)'
 export IOS_APP_PROVISIONING_PROFILE='APP_PROFILE_UUID'
 export IOS_EXTENSION_PROVISIONING_PROFILE='EXTENSION_PROFILE_UUID'
-./scripts/package-ios.sh v2.0.22
+./scripts/package-ios.sh v2.0.23
 ```
 
 Set `IOS_SIGNING_KEYCHAIN` when the certificate is in a custom keychain. The script restores the pinned libXray framework, builds for `ios-arm64`, creates the IPA and verifies its archive, bundle IDs, Packet Tunnel extension, embedded profiles and code signature.
@@ -117,9 +117,9 @@ The workflow checks both bundle IDs, the Packet Tunnel entitlement and the Apple
 Update the app and extension versions first, then create and push the matching tag:
 
 ```powershell
-git tag -a v2.0.22 -m "SaePar Tunnel v2.0.22"
+git tag -a v2.0.23 -m "SaePar Tunnel v2.0.23"
 git push origin main
-git push origin v2.0.22
+git push origin v2.0.23
 ```
 
 The `Release` workflow builds Android and Windows on a Windows runner, validates iOS on a macOS runner, optionally creates the signed IPA, regenerates one checksum manifest and then creates or updates the GitHub Release.

@@ -78,7 +78,7 @@ public sealed class XrayConfigBuilderTests
     {
         var settings = new AppSettings
         {
-            EnableWhitelistRouting = true,
+            EnableWhitelistRouting = true, EnableIranBypass = false,
             WhitelistWebsites = new List<string> { "example.com", "domain:already.test" },
             WhitelistApplications = new List<WhitelistApplication>
             {
@@ -110,7 +110,7 @@ public sealed class XrayConfigBuilderTests
     {
         var settings = new AppSettings
         {
-            EnableWhitelistRouting = true,
+            EnableWhitelistRouting = true, EnableIranBypass = false,
             WhitelistWebsites = new List<string> { "example.com" }
         };
 
@@ -127,7 +127,7 @@ public sealed class XrayConfigBuilderTests
     {
         var settings = new AppSettings
         {
-            EnableWhitelistRouting = true,
+            EnableWhitelistRouting = true, EnableIranBypass = false,
             WhitelistWebsites = new List<string> { ".example.com" }
         };
 
@@ -177,7 +177,7 @@ public sealed class XrayConfigBuilderTests
     {
         var settings = new AppSettings
         {
-            EnableWhitelistRouting = true,
+            EnableWhitelistRouting = true, EnableIranBypass = false,
             WhitelistWebsites = new List<string> { "ios.example.com" }
         };
 
@@ -215,7 +215,7 @@ public sealed class XrayConfigBuilderTests
     [InlineData("ios")]
     public void ActivePingUsesProxyEvenWhenWhitelistDefaultsToDirect(string platform)
     {
-        var settings = new AppSettings { EnableWhitelistRouting = true, WhitelistWebsites = new() { "example.com" } };
+        var settings = new AppSettings { EnableWhitelistRouting = true, EnableIranBypass = false, WhitelistWebsites = new() { "example.com" } };
         var json = platform switch
         {
             "android" => _builder.BuildAndroidTun(VlessProfile(), settings),

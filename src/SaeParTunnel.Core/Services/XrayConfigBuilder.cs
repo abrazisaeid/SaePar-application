@@ -27,14 +27,16 @@ public sealed class XrayConfigBuilder
         // split-tunneling/whitelist rules. In normal mode, whitelist routing places
         // the direct outbound first so every unmatched request goes directly.
         var whitelistEnabled = !testMode && settings?.EnableWhitelistRouting == true;
+        var iranBypass = !testMode && settings?.EnableIranBypass == true;
+        var selectiveRouting = whitelistEnabled && !iranBypass;
 
         var inbounds = new List<object>
         {
-            BuildSocksInbound(socksPort, whitelistEnabled),
-            BuildHttpInbound(httpPort, whitelistEnabled, "http-in")
+            BuildSocksInbound(socksPort, whitelistEnabled || iranBypass),
+            BuildHttpInbound(httpPort, whitelistEnabled || iranBypass, "http-in")
         };
 
-        object[] outbounds = whitelistEnabled
+        object[] outbounds = selectiveRouting
             ? new object[]
             {
                 new { tag = "direct", protocol = "freedom", settings = new { } },
@@ -57,9 +59,10 @@ public sealed class XrayConfigBuilder
 
         if (!testMode)
         {
-            root["routing"] = whitelistEnabled && settings is not null
-                ? BuildWhitelistRouting(settings)
+            root["routing"] = (whitelistEnabled || iranBypass) && settings is not null
+                ? BuildNormalRouting(settings, includeProcesses: true, "whitelist-websites")
                 : BuildPrivateNetworkRouting();
+            if (iranBypass) root["dns"] = BuildRoutingDns();
         }
 
         return JsonSerializer.Serialize(root, JsonOptions);
@@ -132,7 +135,7 @@ public sealed class XrayConfigBuilder
             ["sniffing"] = BuildSniffing()
         };
 
-        object[] outbounds = websiteWhitelistEnabled
+        object[] outbounds = websiteWhitelistEnabled && !settings.EnableIranBypass
             ? new object[]
             {
                 new { tag = "direct", protocol = "freedom", settings = new { } },
@@ -154,11 +157,12 @@ public sealed class XrayConfigBuilder
             // Mobile system DNS packets enter the TUN as ordinary traffic. Keep
             // them on the selected routing path; each platform runtime is
             // responsible for keeping Xray's own outbound sockets outside TUN.
-            ["routing"] = BuildMobileRouting(settings, websiteWhitelistEnabled, whitelistRuleTag)
+            ["routing"] = BuildNormalRouting(settings, includeProcesses: false, whitelistRuleTag)
         };
 
         if (environment is not null)
             root["env"] = environment;
+        if (settings.EnableIranBypass) root["dns"] = BuildRoutingDns();
 
         return JsonSerializer.Serialize(root, JsonOptions);
     }
@@ -196,45 +200,6 @@ public sealed class XrayConfigBuilder
         };
 
         return JsonSerializer.Serialize(root, JsonOptions);
-    }
-
-    private static object BuildMobileRouting(
-        AppSettings settings,
-        bool websiteWhitelistEnabled,
-        string whitelistRuleTag)
-    {
-        // Do not force mobile DNS direct here. The system sends configured DNS
-        // traffic into the VPN like any other packet; keeping it on the proxy path
-        // avoids ISP-side filtering and hijacking. The platform runtime separately
-        // keeps libXray's internal resolver outside the tunnel.
-        var rules = new List<object> { BuildProbeRoutingRule() };
-
-        if (websiteWhitelistEnabled)
-        {
-            var domains = settings.WhitelistWebsites
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Select(NormalizeRoutingDomain)
-                .Where(x => x is not null)
-                .Cast<string>()
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-
-            if (domains.Length > 0)
-            {
-                rules.Add(new
-                {
-                    domain = domains,
-                    outboundTag = "proxy",
-                    ruleTag = whitelistRuleTag
-                });
-            }
-        }
-
-        return new
-        {
-            domainStrategy = "AsIs",
-            rules = rules.ToArray()
-        };
     }
 
     private static object BuildSocksInbound(int port, bool enableSniffing)
@@ -279,50 +244,53 @@ public sealed class XrayConfigBuilder
         routeOnly = true
     };
 
-    private static object BuildWhitelistRouting(AppSettings settings)
+    private static object BuildNormalRouting(AppSettings settings, bool includeProcesses, string whitelistRuleTag)
     {
+        // Probe rules always validate the proxy, including when a user has added
+        // a probe host to their direct list. Unknown/foreign traffic stays proxied.
         var rules = new List<object> { BuildProbeRoutingRule(), BuildPrivateNetworkRule() };
-
-        var processes = settings.WhitelistApplications
-            .Where(x => x is not null && !string.IsNullOrWhiteSpace(x.ExecutablePath))
-            .Select(x => x.WindowsRoutingPath)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
-        if (processes.Length > 0)
+        if (settings.EnableIranBypass)
         {
-            rules.Add(new
-            {
-                process = processes,
-                outboundTag = "proxy",
-                ruleTag = "whitelist-applications"
-            });
+            // IP classification uses encrypted DNS through the proxy, so an ISP
+            // block-page IP cannot silently classify a foreign domain as Iranian.
+            rules.Add(new { type = "field", inboundTag = new[] { "routing-dns" }, outboundTag = "proxy", ruleTag = "routing-dns-proxy" });
+            var catalog = IranRoutingCatalog.Default;
+            var custom = settings.DirectRoutingEntries.Select(RoutingListParser.Normalize)
+                .OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var customDomains = custom.Where(x => !RoutingListParser.IsIpEntry(x)).Select(x => "domain:" + x).ToArray();
+            var customIps = custom.Where(RoutingListParser.IsIpEntry).ToArray();
+            if (customDomains.Length > 0) rules.Add(DomainRule(customDomains, "direct", "custom-direct-domains"));
+            if (customIps.Length > 0) rules.Add(IpRule(customIps, "custom-direct-ips"));
+            if (catalog.ProxyDomains.Length > 0) rules.Add(DomainRule(catalog.ProxyDomains, "proxy", "iran-proxy-exceptions"));
+            rules.Add(DomainRule(catalog.DirectDomains, "direct", "iran-domains"));
+            rules.Add(IpRule(catalog.IpRanges, "iran-ip-ranges"));
         }
-
-        var domains = settings.WhitelistWebsites
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Select(NormalizeRoutingDomain)
-            .Where(x => x is not null)
-            .Cast<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        if (domains.Length > 0)
+        else if (settings.EnableWhitelistRouting)
         {
-            rules.Add(new
+            if (includeProcesses)
             {
-                domain = domains,
-                outboundTag = "proxy",
-                ruleTag = "whitelist-websites"
-            });
+                var processes = settings.WhitelistApplications.Where(x => x is not null && !string.IsNullOrWhiteSpace(x.ExecutablePath))
+                    .Select(x => x.WindowsRoutingPath).Distinct(StringComparer.Ordinal).ToArray();
+                if (processes.Length > 0) rules.Add(new { type = "field", process = processes, outboundTag = "proxy", ruleTag = "whitelist-applications" });
+            }
+            var domains = settings.WhitelistWebsites.Select(NormalizeRoutingDomain).OfType<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (domains.Length > 0) rules.Add(DomainRule(domains, "proxy", whitelistRuleTag));
         }
-
-        return new
-        {
-            domainStrategy = "AsIs",
-            rules
-        };
+        return new { domainStrategy = settings.EnableIranBypass ? "IPIfNonMatch" : "AsIs", rules = rules.ToArray() };
     }
+
+    private static object DomainRule(string[] domains, string tag, string ruleTag) => new
+    { type = "field", domain = domains, outboundTag = tag, ruleTag };
+
+    private static object IpRule(string[] ips, string ruleTag) => new
+    { type = "field", ip = ips, outboundTag = "direct", ruleTag };
+
+    private static object BuildRoutingDns() => new
+    {
+        servers = new[] { "https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query" },
+        queryStrategy = "UseIP", disableCache = false, tag = "routing-dns"
+    };
 
     private static object BuildPrivateNetworkRouting() => new
     {

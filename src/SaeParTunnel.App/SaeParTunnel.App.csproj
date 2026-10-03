@@ -11,10 +11,10 @@
     <LangVersion>latest</LangVersion>
     <ApplicationTitle>SaePar Tunnel</ApplicationTitle>
     <ApplicationId>com.saepar.tunnel</ApplicationId>
-    <ApplicationDisplayVersion>2.0.22</ApplicationDisplayVersion>
-    <ApplicationVersion>42</ApplicationVersion>
-    <Version>2.0.22</Version>
-    <PackageVersion>2.0.22</PackageVersion>
+    <ApplicationDisplayVersion>2.0.23</ApplicationDisplayVersion>
+    <ApplicationVersion>43</ApplicationVersion>
+    <Version>2.0.23</Version>
+    <PackageVersion>2.0.23</PackageVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
@@ -62,5 +62,9 @@
     <PackageReference Include="Microsoft.Maui.Controls" Version="9.0.120" />
     <PackageReference Include="QRCoder" Version="1.8.0" />
     <ProjectReference Include="..\SaeParTunnel.Core\SaeParTunnel.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+    <Content Include="..\SaeParTunnel.Core\Data\Iran\LICENSE-iran-hosted-domains.txt" Link="ThirdParty\IranRouting\LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\SaeParTunnel.Core\Data\Iran\SOURCES.json" Link="ThirdParty\IranRouting\SOURCES.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

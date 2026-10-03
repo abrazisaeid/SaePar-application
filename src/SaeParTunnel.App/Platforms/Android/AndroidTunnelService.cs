@@ -187,8 +187,8 @@ public sealed class AndroidTunnelService : ITunnelService
             AndroidVpnRuntime.ReportStatus("permission-already-granted", "مجوز VPN قبلاً برای SaePar Tunnel صادر شده؛ Android دیگر پنجره مجوز را نشان نمی‌دهد. در حال اتصال...");
         }
 
-        var xrayJson = _configBuilder.BuildAndroidTun(profile, settings, 1400);
-        var allowedPackages = settings.EnableWhitelistRouting
+        var xrayJson = await Task.Run(() => _configBuilder.BuildAndroidTun(profile, settings, 1400), cancellationToken);
+        var allowedPackages = settings.EnableWhitelistRouting && !settings.EnableIranBypass
             ? settings.WhitelistApplications
                 .Where(x => x is not null && !string.IsNullOrWhiteSpace(x.PackageName))
                 .Where(x => string.IsNullOrWhiteSpace(x.Platform) || x.Platform.Equals("Android", StringComparison.OrdinalIgnoreCase))

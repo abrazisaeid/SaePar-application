@@ -257,7 +257,7 @@ public sealed class WindowsTunnelService : ITunnelService
             settings.SocksPort = ports.Socks;
             settings.HttpPort = ports.Http;
 
-            var json = _builder.Build(profile, settings.SocksPort, settings.HttpPort, settings: settings);
+            var json = await Task.Run(() => _builder.Build(profile, settings.SocksPort, settings.HttpPort, settings: settings), cancellationToken);
             await File.WriteAllTextAsync(configPath, json, cancellationToken);
 
             var diagnostics = new ConcurrentQueue<string>();
@@ -568,7 +568,9 @@ public sealed class WindowsTunnelService : ITunnelService
         }
         key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
         key.SetValue("ProxyServer", $"http=127.0.0.1:{settings.HttpPort};https=127.0.0.1:{settings.HttpPort}");
-        key.SetValue("ProxyOverride", BuildSystemProxyBypass(settings.PreviousProxyOverride), RegistryValueKind.String);
+        // Old system bypass patterns must not send foreign sites directly while
+        // Iran routing is enabled. Restore the original value on disconnect.
+        key.SetValue("ProxyOverride", BuildSystemProxyBypass(settings.EnableIranBypass ? null : settings.PreviousProxyOverride), RegistryValueKind.String);
         settings.ProxyWasManaged = true; RefreshInternetOptions();
     }
 

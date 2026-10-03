@@ -2,7 +2,7 @@ namespace SaeParTunnel.Core.Models;
 
 public sealed class AppSettings
 {
-    public int DataSchemaVersion { get; set; } = 27;
+    public int DataSchemaVersion { get; set; } = 28;
     public string XrayPath { get; set; } = string.Empty;
     public int SocksPort { get; set; } = 10808;
     public int HttpPort { get; set; } = 10809;
@@ -23,6 +23,8 @@ public sealed class AppSettings
     public DateTime? LastCommunityHealthFetchUtc { get; set; }
 
     public bool EnableWhitelistRouting { get; set; }
+    public bool EnableIranBypass { get; set; } = true;
+    public List<string> DirectRoutingEntries { get; set; } = new();
     public List<WhitelistApplication> WhitelistApplications { get; set; } = new();
     public List<string> WhitelistWebsites { get; set; } = new();
 

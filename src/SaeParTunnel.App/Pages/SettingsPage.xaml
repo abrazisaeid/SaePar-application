@@ -10,7 +10,7 @@
                 <VerticalStackLayout Spacing="10">
                     <Label Text="مدیریت" FontSize="19" FontAttributes="Bold" />
                     <Button Text="سرورها و منابع" Clicked="OpenAdvancedPage" CommandParameter="advanced-configs" IsEnabled="{Binding IsNotBusy}" />
-                    <Button Text="برنامه‌ها و سایت‌های منتخب" Clicked="OpenAdvancedPage" CommandParameter="advanced-whitelist" IsEnabled="{Binding IsNotBusy}" />
+                    <Button Text="سایت‌های ایرانی و مسیر VPN" Clicked="OpenAdvancedPage" CommandParameter="advanced-whitelist" IsEnabled="{Binding IsNotBusy}" />
                     <Button Text="عیب‌یابی اتصال" Clicked="OpenAdvancedPage" CommandParameter="advanced-diagnostics" IsEnabled="{Binding IsNotBusy}" />
                     <Button Text="تنظیمات VPN اندروید" Command="{Binding OpenAndroidVpnSettingsCommand}" IsVisible="{Binding IsAndroid}" IsEnabled="{Binding IsNotBusy}" />
                 </VerticalStackLayout>

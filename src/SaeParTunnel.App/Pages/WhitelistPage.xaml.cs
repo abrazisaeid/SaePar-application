@@ -9,6 +9,10 @@ public partial class WhitelistPage : ContentPage
     {
         if (sender is Button { BindingContext: string website }) _vm.RemoveWebsiteCommand.Execute(website);
     }
+    private void OnRemoveDirectRouteClicked(object? sender, EventArgs e)
+    {
+        if (sender is Button { BindingContext: string entry }) _vm.RemoveDirectRouteCommand.Execute(entry);
+    }
     private void OnRemoveApplicationClicked(object? sender, EventArgs e)
     {
         if (sender is Button { BindingContext: WhitelistApplication app }) _vm.RemoveApplicationCommand.Execute(app);

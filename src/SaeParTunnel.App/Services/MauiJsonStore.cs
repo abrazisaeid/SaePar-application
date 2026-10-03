@@ -43,9 +43,12 @@ public sealed class MauiJsonStore
         var settings = await ReadAsync<AppSettings>(SettingsPath) ?? new AppSettings();
         var refreshValidators = settings.DataSchemaVersion < 27;
         var shouldSave = settings.DataSchemaVersion < new AppSettings().DataSchemaVersion;
+        // Preserve an explicitly selected legacy whitelist mode on upgrades.
+        if (settings.DataSchemaVersion < 28 && settings.EnableWhitelistRouting) settings.EnableIranBypass = false;
         settings.DataSchemaVersion = Math.Max(settings.DataSchemaVersion, new AppSettings().DataSchemaVersion);
         settings.WhitelistApplications ??= new List<WhitelistApplication>();
         settings.WhitelistWebsites ??= new List<string>();
+        settings.DirectRoutingEntries ??= new List<string>();
         settings.SuppressedProfileIds ??= new Dictionary<string, DateTime>();
         shouldSave |= SubscriptionCatalog.Normalize(settings);
         if (refreshValidators)

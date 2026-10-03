@@ -1,31 +1,72 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             Shell.NavBarIsVisible="True" x:Class="SaeParTunnel.App.Pages.WhitelistPage" Title="برنامه‌ها و سایت‌ها">
+             xmlns:vm="clr-namespace:SaeParTunnel.App.ViewModels"
+             xmlns:models="clr-namespace:SaeParTunnel.Core.Models;assembly=SaeParTunnel.Core"
+             x:DataType="vm:MainViewModel"
+             Shell.NavBarIsVisible="True" x:Class="SaeParTunnel.App.Pages.WhitelistPage" Title="مسیر سایت‌ها">
     <ScrollView>
-        <VerticalStackLayout Padding="20" Spacing="16" MaximumWidthRequest="1000">
-            <Label Text="برنامه‌ها و سایت‌های منتخب" Style="{StaticResource TitleLabel}" />
+        <VerticalStackLayout Padding="20" Spacing="20" MaximumWidthRequest="600">
+            <Label Text="مسیر سایت‌ها و برنامه‌ها" FontSize="24" FontAttributes="Bold" />
             <Border Style="{StaticResource Card}">
-                <Grid ColumnDefinitions="*,Auto">
-                    <VerticalStackLayout>
-                        <Label Text="فعال‌سازی Whitelist" FontAttributes="Bold"/>
-                        <Label Text="Windows: موارد لیست‌شده Proxy و بقیه Direct. Android: اگر برنامه انتخاب کنی فقط همان برنامه‌ها وارد VPN می‌شوند؛ دامنه‌های Whitelist داخل VPN از Proxy عبور می‌کنند." Style="{StaticResource SubtleLabel}"/>
+                <VerticalStackLayout Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                        <Label Text="سایت‌های ایرانی بدون VPN" FontSize="18" FontAttributes="Bold" VerticalOptions="Center" LineBreakMode="WordWrap" />
+                        <Switch Grid.Column="1" IsToggled="{Binding IranBypassEnabled}" IsEnabled="{Binding CanSearchServers}" />
+                    </Grid>
+                    <Label Text="سایت‌های ایرانی مستقیم باز می‌شوند.&#10;سایر سایت‌ها از VPN عبور می‌کنند." FontSize="16" LineHeight="1.4" LineBreakMode="WordWrap" />
+                    <Label Text="{Binding IranRoutingSummary}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                    <Label Text="نیازی به وارد کردن فهرست نیست. می‌توانی سایت‌های دلخواهت را هم اضافه کنی." Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                    <Label Text="برای تغییر مسیرها، اول اتصال را قطع کن." IsVisible="{Binding IsConnected}" TextColor="{StaticResource Warning}" />
+                </VerticalStackLayout>
+            </Border>
+            <Border Style="{StaticResource Card}" IsVisible="{Binding IranBypassEnabled}">
+                <VerticalStackLayout Spacing="12" IsEnabled="{Binding CanSearchServers}">
+                    <Label Text="فهرست شخصی بدون VPN" FontSize="18" FontAttributes="Bold" />
+                    <Label Text="آدرس سایت یا محدودهٔ IP را بنویس؛ هر مورد در یک خط." FontSize="16" LineBreakMode="WordWrap" />
+                    <Editor Text="{Binding DirectRoutingText}" Placeholder="example.ir&#10;https://example.com&#10;192.0.2.0/24" HeightRequest="120" FlowDirection="LeftToRight"
+                            TextColor="{StaticResource TextPrimary}" PlaceholderColor="{StaticResource TextSecondary}" BackgroundColor="{StaticResource Surface2}" FontSize="16" />
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                        <Button Text="افزودن فهرست" Command="{Binding AddDirectRoutesCommand}" Style="{StaticResource PrimaryButton}" />
+                        <Button Grid.Column="1" Text="انتخاب فایل فهرست" Command="{Binding ImportDirectRoutesCommand}" />
+                    </Grid>
+                    <Label Text="{Binding RoutingFeedback}" LineBreakMode="WordWrap" TextColor="{StaticResource Accent}" />
+                    <Label Text="{Binding DirectRoutingSummary}" Style="{StaticResource SubtleLabel}" />
+                    <VerticalStackLayout BindableLayout.ItemsSource="{Binding DirectRoutingPreview}" Spacing="8">
+                        <BindableLayout.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <Label Text="{Binding .}" FlowDirection="LeftToRight" VerticalOptions="Center" LineBreakMode="MiddleTruncation" />
+                                    <Button Grid.Column="1" Text="حذف" Clicked="OnRemoveDirectRouteClicked" Style="{StaticResource DangerButton}" />
+                                </Grid>
+                            </DataTemplate>
+                        </BindableLayout.ItemTemplate>
                     </VerticalStackLayout>
-                    <Switch Grid.Column="1" IsToggled="{Binding Settings.EnableWhitelistRouting}"/>
+                    <Button Text="پاک کردن فهرست شخصی" Command="{Binding ClearDirectRoutesCommand}" BackgroundColor="Transparent" TextColor="{StaticResource Danger}" />
+                </VerticalStackLayout>
+            </Border>
+            <Border Style="{StaticResource Card}">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <VerticalStackLayout Spacing="10">
+                        <Label Text="VPN فقط برای موارد انتخابی" FontSize="18" FontAttributes="Bold"/>
+                        <Label Text="فقط سایت‌ها و برنامه‌های انتخاب‌شده از VPN استفاده می‌کنند. بقیه مستقیم باز می‌شوند." FontSize="16" LineHeight="1.4" LineBreakMode="WordWrap" />
+                        <Label Text="برای این حالت، گزینهٔ سایت‌های ایرانی را خاموش کن." IsVisible="{Binding IranBypassEnabled}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+                    </VerticalStackLayout>
+                    <Switch Grid.Column="1" IsToggled="{Binding LegacyWhitelistEnabled}" IsEnabled="{Binding LegacyRoutingAllowed}"/>
                 </Grid>
             </Border>
 
-            <Border Style="{StaticResource Card}">
+            <Border Style="{StaticResource Card}" IsVisible="{Binding LegacyWhitelistEnabled}">
                 <VerticalStackLayout Spacing="10">
                     <Label Text="وب‌سایت‌ها" FontSize="19" FontAttributes="Bold" />
-                    <Label Text="دامنه را بدون مسیر وارد کن؛ زیر‌دامنه‌ها هم Match می‌شوند." Style="{StaticResource SubtleLabel}" />
+                    <Label Text="نام سایت را وارد کن؛ زیر‌دامنه‌هایش هم از VPN عبور می‌کنند." FontSize="16" LineBreakMode="WordWrap" />
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                         <Entry Placeholder="example.com" Text="{Binding NewWebsite}"/>
                         <Button Grid.Column="1" Text="افزودن" Command="{Binding AddWebsiteCommand}" Style="{StaticResource PrimaryButton}"/>
                     </Grid>
                     <VerticalStackLayout BindableLayout.ItemsSource="{Binding WhitelistWebsites}" Spacing="6">
                         <BindableLayout.ItemTemplate>
-                            <DataTemplate>
+                            <DataTemplate x:DataType="x:String">
                                 <Grid ColumnDefinitions="*,Auto" BackgroundColor="{StaticResource Surface2}" Padding="10">
                                     <Label Text="{Binding .}"/>
                                     <Button Grid.Column="1" Text="حذف" Clicked="OnRemoveWebsiteClicked" Style="{StaticResource DangerButton}"/>
@@ -36,7 +77,7 @@
                 </VerticalStackLayout>
             </Border>
 
-            <Border Style="{StaticResource Card}">
+            <Border Style="{StaticResource Card}" IsVisible="{Binding LegacyWhitelistEnabled}">
                 <VerticalStackLayout Spacing="10">
                     <Label Text="نرم‌افزارها" FontSize="19" FontAttributes="Bold" />
                     <Label Text="{Binding AppWhitelistHint}" Style="{StaticResource SubtleLabel}" />
@@ -47,7 +88,7 @@
                     </Grid>
                     <VerticalStackLayout BindableLayout.ItemsSource="{Binding WhitelistApplications}" Spacing="6">
                         <BindableLayout.ItemTemplate>
-                            <DataTemplate>
+                            <DataTemplate x:DataType="models:WhitelistApplication">
                                 <Grid ColumnDefinitions="*,Auto" BackgroundColor="{StaticResource Surface2}" Padding="10">
                                     <VerticalStackLayout>
                                         <Label Text="{Binding DisplayName}"/>
@@ -60,7 +101,9 @@
                     </VerticalStackLayout>
                 </VerticalStackLayout>
             </Border>
-            <Button Text="ذخیره تنظیمات Whitelist" Command="{Binding SaveSettingsCommand}" Style="{StaticResource PrimaryButton}" />
+            <Label Text="در ویندوز، این مسیرها روی برنامه‌هایی اعمال می‌شوند که از پروکسی سیستم استفاده می‌کنند." IsVisible="{Binding IsWindows}" Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+            <Label Text="فهرست پیش‌فرض به‌همراه به‌روزرسانی برنامه تازه می‌شود. هیچ فهرستی همهٔ سایت‌ها را پوشش نمی‌دهد." Style="{StaticResource SubtleLabel}" LineBreakMode="WordWrap" />
+            <Button Text="ذخیره تنظیمات" Command="{Binding SaveSettingsCommand}" Style="{StaticResource PrimaryButton}" />
         </VerticalStackLayout>
     </ScrollView>
 </ContentPage>

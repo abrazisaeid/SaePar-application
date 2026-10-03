@@ -7,4 +7,8 @@
     <RootNamespace>SaeParTunnel.Core</RootNamespace>
     <AssemblyName>SaeParTunnel.Core</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Data\Iran\catalog.json.gz" LogicalName="IranRoutingCatalog.json.gz" />
+    <EmbeddedResource Include="Data\Iran\LICENSE-iran-hosted-domains.txt" LogicalName="IranRoutingCatalog.LICENSE.txt" />
+  </ItemGroup>
 </Project>

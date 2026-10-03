@@ -69,6 +69,8 @@ public sealed class MainViewModel : ObservableObject
     private double _progressPercent;
     private string _progressSpeed = "-", _progressEta = "-", _testGoalMessage = "";
     private string _newWebsite = "", _newApplication = "";
+    private string _directRoutingText = "", _routingFeedback = "";
+    private string _iranRoutingSummary = "فهرست آمادهٔ ایران همراه برنامه است.";
     private string _newSubscriptionName = "", _newSubscriptionUrl = "";
     private bool _isSubscriptionEditorExpanded;
     private string _communityHealthStatusMessage = "داده جمعی خاموش است. برای استفاده، یک آدرس HTTPS JSON عمومی وارد کن.";
@@ -121,6 +123,23 @@ public sealed class MainViewModel : ObservableObject
         BrowseXrayCommand = new Command(async () => await RunSafeAsync(BrowseXrayAsync));
         AddWebsiteCommand = new Command(AddWebsite);
         RemoveWebsiteCommand = new Command<string>(RemoveWebsite);
+        AddDirectRoutesCommand = new Command(async () => await RunSafeAsync(() => AddDirectRoutesAsync(DirectRoutingText)));
+        ImportDirectRoutesCommand = new Command(async () => await RunSafeAsync(ImportDirectRoutesAsync));
+        RemoveDirectRouteCommand = new Command<string>(async entry => await RunSafeAsync(async () =>
+        {
+            if (!CanSearchServers || entry is null) return;
+            DirectRoutingEntries.Remove(entry);
+            RefreshRoutingList();
+            await PersistSettingsAsync();
+        }));
+        ClearDirectRoutesCommand = new Command(async () => await RunSafeAsync(async () =>
+        {
+            if (!CanSearchServers || DirectRoutingEntries.Count == 0) return;
+            if (!await Shell.Current.DisplayAlert("پاک کردن فهرست شخصی", "فهرست شخصی پاک شود؟ فهرست پیش‌فرض ایران حفظ می‌شود.", "پاک شود", "لغو")) return;
+            DirectRoutingEntries.Clear();
+            RefreshRoutingList();
+            await PersistSettingsAsync();
+        }));
         AddApplicationCommand = new Command(AddApplication);
         BrowseApplicationCommand = new Command(async () => await RunSafeAsync(BrowseApplicationAsync));
         OpenAndroidVpnSettingsCommand = new Command(async () => await RunSafeAsync(OpenAndroidVpnSettingsAsync));
@@ -142,6 +161,40 @@ public sealed class MainViewModel : ObservableObject
     public ObservableRangeCollection<ConfigProfile> HealthyProfiles { get; } = new();
     public ObservableRangeCollection<SubscriptionSourceViewModel> SubscriptionSources { get; } = new();
     public ObservableRangeCollection<string> WhitelistWebsites { get; } = new();
+    public ObservableRangeCollection<string> DirectRoutingEntries { get; } = new();
+    public IReadOnlyList<string> DirectRoutingPreview => DirectRoutingEntries.Take(20).ToArray();
+    public string DirectRoutingSummary => DirectRoutingEntries.Count > 20
+        ? $"{DirectRoutingEntries.Count:N0} مورد شخصی؛ ۲۰ مورد اول نمایش داده می‌شود."
+        : $"{DirectRoutingEntries.Count:N0} مورد در فهرست شخصی";
+    public string DirectRoutingText { get => _directRoutingText; set => SetProperty(ref _directRoutingText, value); }
+    public string RoutingFeedback { get => _routingFeedback; private set => SetProperty(ref _routingFeedback, value); }
+    public string IranRoutingSummary => _iranRoutingSummary;
+    public bool IranBypassEnabled
+    {
+        get => Settings.EnableIranBypass;
+        set
+        {
+            if (Settings.EnableIranBypass == value || !CanSearchServers) return;
+            Settings.EnableIranBypass = value;
+            if (value) Settings.EnableWhitelistRouting = false;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(LegacyWhitelistEnabled));
+            OnPropertyChanged(nameof(LegacyRoutingAllowed));
+            _ = RunSafeAsync(() => PersistSettingsAsync());
+        }
+    }
+    public bool LegacyRoutingAllowed => !IranBypassEnabled && CanSearchServers;
+    public bool LegacyWhitelistEnabled
+    {
+        get => Settings.EnableWhitelistRouting && !Settings.EnableIranBypass;
+        set
+        {
+            if (!LegacyRoutingAllowed || Settings.EnableWhitelistRouting == value) return;
+            Settings.EnableWhitelistRouting = value;
+            OnPropertyChanged();
+            _ = RunSafeAsync(() => PersistSettingsAsync());
+        }
+    }
     public ObservableRangeCollection<WhitelistApplication> WhitelistApplications { get; } = new();
     public IReadOnlyList<string> StatusFilters { get; } = new[] { "همه", "سالم", "TCP قابل دسترس", "ناموفق", "تست نشده", "پشتیبانی‌نشده" };
     public IReadOnlyList<string> ProtocolFilters { get; } = new[] { "همه", "VLESS", "VMess", "Trojan", "Shadowsocks" };
@@ -565,6 +618,10 @@ public sealed class MainViewModel : ObservableObject
     public Command BrowseXrayCommand { get; }
     public Command AddWebsiteCommand { get; }
     public Command<string> RemoveWebsiteCommand { get; }
+    public Command AddDirectRoutesCommand { get; }
+    public Command ImportDirectRoutesCommand { get; }
+    public Command<string> RemoveDirectRouteCommand { get; }
+    public Command ClearDirectRoutesCommand { get; }
     public Command AddApplicationCommand { get; }
     public Command BrowseApplicationCommand { get; }
     public Command OpenAndroidVpnSettingsCommand { get; }
@@ -585,6 +642,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowDisconnectAction));
         OnPropertyChanged(nameof(ShowConnectionTools));
         OnPropertyChanged(nameof(CanStartConnection));
+        OnPropertyChanged(nameof(LegacyRoutingAllowed));
         OnPropertyChanged(nameof(CanStopConnection));
         OnPropertyChanged(nameof(ConnectionBadgeText));
         ConnectCommand?.ChangeCanExecute();
@@ -618,6 +676,14 @@ public sealed class MainViewModel : ObservableObject
         {
             _store.EnsureCreated();
             Settings = await _store.LoadSettingsAsync();
+            await Task.Run(() => _ = IranRoutingCatalog.Default);
+            _iranRoutingSummary = $"{IranRoutingCatalog.Default.DirectDomains.Length:N0} دامنه و {IranRoutingCatalog.Default.IpRanges.Length:N0} محدودهٔ IP در فهرست پیش‌فرض";
+            DirectRoutingEntries.ReplaceRange(Settings.DirectRoutingEntries);
+            RefreshRoutingList();
+            OnPropertyChanged(nameof(IranBypassEnabled));
+            OnPropertyChanged(nameof(IranRoutingSummary));
+            OnPropertyChanged(nameof(LegacyWhitelistEnabled));
+            OnPropertyChanged(nameof(LegacyRoutingAllowed));
             LoadSubscriptionSources();
             ShowAdvancedConfigTools = !Settings.QuickMode;
             if (Settings.TestConcurrency <= 0)
@@ -2007,6 +2073,7 @@ public sealed class MainViewModel : ObservableObject
         Settings.TestConcurrency = Math.Clamp(Settings.TestConcurrency, 1, DeviceInfo.Platform == DevicePlatform.WinUI ? 64 : 12);
         Settings.AutoReconnectAttempts = Math.Clamp(Settings.AutoReconnectAttempts <= 0 ? 3 : Settings.AutoReconnectAttempts, 1, 5);
         Settings.WhitelistWebsites = WhitelistWebsites.ToList();
+        Settings.DirectRoutingEntries = DirectRoutingEntries.ToList();
         Settings.WhitelistApplications = WhitelistApplications.ToList();
         SyncSubscriptionSettings();
         await _store.SaveSettingsAsync(Settings);
@@ -2018,6 +2085,45 @@ public sealed class MainViewModel : ObservableObject
         RefreshCommunityHealthStatusMessage();
         RefreshDiagnosticsReport();
         if (announce) StatusMessage = "تنظیمات ذخیره شد.";
+    }
+
+    private void RefreshRoutingList()
+    {
+        OnPropertyChanged(nameof(DirectRoutingPreview));
+        OnPropertyChanged(nameof(DirectRoutingSummary));
+    }
+
+    private async Task AddDirectRoutesAsync(string text)
+    {
+        if (!CanSearchServers) return;
+        var result = await Task.Run(() => RoutingListParser.Parse(text));
+        if (!CanSearchServers) { RoutingFeedback = "برای تغییر فهرست، اتصال را قطع کن."; return; }
+        var before = DirectRoutingEntries.Count;
+        var merged = DirectRoutingEntries.Concat(result.Entries).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (merged.Length > RoutingListParser.MaxEntries) throw new InvalidOperationException("فهرست شخصی بیش از ۱۰۰ هزار مورد می‌شود.");
+        DirectRoutingEntries.ReplaceRange(merged);
+        DirectRoutingText = "";
+        RefreshRoutingList();
+        await PersistSettingsAsync();
+        RoutingFeedback = $"{merged.Length - before:N0} مورد اضافه شد؛ {result.InvalidCount:N0} مورد نامعتبر نادیده گرفته شد.";
+    }
+
+    private async Task ImportDirectRoutesAsync()
+    {
+        if (!CanSearchServers) return;
+        var file = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "انتخاب فهرست سایت‌ها یا محدوده‌های IP" });
+        if (file is null) return;
+        using var stream = await file.OpenReadAsync();
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var buffer = new char[8192];
+        var text = new StringBuilder();
+        int count;
+        while ((count = await reader.ReadAsync(buffer.AsMemory())) > 0)
+        {
+            if (text.Length + count > RoutingListParser.MaxTextLength) throw new InvalidOperationException("حجم فایل نباید بیشتر از ۴ مگابایت باشد.");
+            text.Append(buffer, 0, count);
+        }
+        await AddDirectRoutesAsync(text.ToString());
     }
 
     private void AddWebsite()

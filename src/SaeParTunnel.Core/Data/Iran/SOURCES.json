@@ -1,0 +1,9 @@
+﻿{
+    "DomainSource":  "https://github.com/bootmortis/iran-hosted-domains/releases/tag/202609280201",
+    "DomainSha256":  "93e5ca20cb4e4db5f71bfa941d319881920d047077c44771d3e4836d9be24cc3",
+    "IpSource":  "https://stat.ripe.net/docs/data-api/api-endpoints/country-resource-list",
+    "IpSnapshot":  "2026-10-02T00:00:00",
+    "DirectDomains":  57554,
+    "ProxyExceptions":  2,
+    "IpRanges":  2543
+}
