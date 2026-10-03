@@ -41,6 +41,7 @@ public sealed class SaeParVpnService : VpnService
     public override void OnCreate()
     {
         base.OnCreate();
+        AndroidVpnRuntime.ReportServiceCreated();
         EnsureNotificationChannel();
     }
 
@@ -76,13 +77,26 @@ public sealed class SaeParVpnService : VpnService
 
     public override void OnDestroy()
     {
-        // Android may destroy the service without sending our explicit stop action.
-        // Keep cleanup idempotent and bounded.
-        try { SaeParXrayBridge.DetachTun(); } catch { }
-        try { _vpnInterface?.Close(); } catch { }
-        _vpnInterface = null;
-        AndroidVpnRuntime.SignalDisconnected();
+        // Native start/stop may hold the Java bridge lock. Never wait for that
+        // lock on Android's main thread; acknowledge shutdown after cleanup.
+        _ = Task.Run(FinalizeDestroyedServiceAsync);
         base.OnDestroy();
+    }
+
+    private async Task FinalizeDestroyedServiceAsync()
+    {
+        await _lifecycleGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            _stopping = true;
+            await StopCoreAndInterfaceOnlyAsync().ConfigureAwait(false);
+        }
+        catch { }
+        finally
+        {
+            AndroidVpnRuntime.ReportServiceStopped();
+            _lifecycleGate.Release();
+        }
     }
 
     private async Task StartTunnelAsync(string configToken, string profileId, string profileName, string[] allowedPackages)
@@ -252,7 +266,6 @@ public sealed class SaeParVpnService : VpnService
             if (_stopping) return;
             _stopping = true;
             await StopCoreAndInterfaceOnlyAsync().ConfigureAwait(false);
-            AndroidVpnRuntime.SignalDisconnected();
             StopForeground(StopForegroundFlags.Remove);
             StopSelf();
         }

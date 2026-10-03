@@ -167,6 +167,9 @@ public sealed class AndroidTunnelService : ITunnelService
     {
         cancellationToken.ThrowIfCancellationRequested();
         await EnsureReadyAsync(settings, cancellationToken: cancellationToken);
+        // A timeout/error may precede destruction of the previous service.
+        if (AndroidVpnRuntime.IsServiceRunning)
+            await DisconnectAsync(settings, cancellationToken);
 
         var activity = Platform.CurrentActivity as MainActivity
             ?? throw new InvalidOperationException("Android Activity برای درخواست مجوز VPN در دسترس نیست.");
@@ -233,11 +236,10 @@ public sealed class AndroidTunnelService : ITunnelService
                 activity.StartService(intent);
             await wait.ConfigureAwait(false);
         }
-        catch (System.OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (System.OperationCanceledException)
         {
-            var stopIntent = new Intent(activity, typeof(SaeParVpnService));
-            stopIntent.SetAction(SaeParVpnService.ActionDisconnect);
-            activity.StartService(stopIntent);
+            await DisconnectAsync(settings, CancellationToken.None);
+            if (cancellationToken.IsCancellationRequested) throw;
             throw new TimeoutException("راه‌اندازی و تست اینترنت VPN Android بیشتر از 25 ثانیه طول کشید.");
         }
         finally
@@ -254,32 +256,35 @@ public sealed class AndroidTunnelService : ITunnelService
         CancellationToken cancellationToken = default)
     {
         var activity = Platform.CurrentActivity;
+        if (!AndroidVpnRuntime.IsServiceRunning) return;
         if (activity is null)
-        {
-            AndroidVpnRuntime.SignalDisconnected();
-            return;
-        }
-
-        if (!IsConnected)
-        {
-            var stopOnly = new Intent(activity, typeof(SaeParVpnService));
-            stopOnly.SetAction(SaeParVpnService.ActionDisconnect);
-            activity.StartService(stopOnly);
-            return;
-        }
+            throw new TunnelStartupException("برای قطع سرویس VPN، صفحهٔ برنامه باید باز باشد.");
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
         var wait = AndroidVpnRuntime.PrepareStopWaitAsync(timeoutCts.Token);
 
-        var intent = new Intent(activity, typeof(SaeParVpnService));
-        intent.SetAction(SaeParVpnService.ActionDisconnect);
-        activity.StartService(intent);
+        if (!AndroidVpnRuntime.IsServiceRunning)
+            AndroidVpnRuntime.SignalDisconnected();
+        else if (AndroidVpnRuntime.TryRequestStop())
+        {
+            try
+            {
+                var intent = new Intent(activity, typeof(SaeParVpnService));
+                intent.SetAction(SaeParVpnService.ActionDisconnect);
+                activity.StartService(intent);
+            }
+            catch
+            {
+                AndroidVpnRuntime.ResetStopRequest();
+                throw;
+            }
+        }
 
         try { await wait.ConfigureAwait(false); }
         catch (System.OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            AndroidVpnRuntime.SignalDisconnected();
+            throw new TunnelStartupException("سرویس VPN قبلی هنوز بسته نشده است. از تنظیمات VPN اندروید اتصال را قطع کن و دوباره تلاش کن.");
         }
     }
 

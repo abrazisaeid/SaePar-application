@@ -20,6 +20,11 @@ failure counter used for old-server deletion. Standalone server retests still
 update health normally. Local VPN startup errors retain the candidates and show
 the failure instead of requesting another search.
 
+Retries await complete destruction/cleanup of the previous service. Sending a
+stop command or reporting a startup error is not treated as a shutdown
+acknowledgement. Duplicate stop requests are suppressed; native final cleanup
+runs off Android's main thread to avoid waiting for the bridge lock in OnDestroy.
+
 The Android interface MTU matches the Xray TUN configuration (1400). The native
 core's protected bootstrap resolver uses the physical network's DNS captured
 before establishing the VPN. HTTP connectivity checks require HTTP 204.

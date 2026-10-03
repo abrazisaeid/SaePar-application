@@ -13,6 +13,8 @@ internal static class AndroidVpnRuntime
     private static TaskCompletionSource<bool>? _startWaiter;
     private static TaskCompletionSource<bool>? _stopWaiter;
     private static volatile bool _isConnected;
+    private static volatile bool _isServiceRunning;
+    private static bool _stopRequested;
     private static string _connectedProfileId = string.Empty;
     private static string _lastError = string.Empty;
     private static string _statusMessage = "VPN Android آماده است.";
@@ -20,6 +22,7 @@ internal static class AndroidVpnRuntime
     public static event EventHandler<AndroidVpnStatusEventArgs>? StatusChanged;
 
     public static bool IsConnected => _isConnected;
+    public static bool IsServiceRunning => _isServiceRunning;
     public static string ConnectedProfileId => _connectedProfileId;
     public static string LastError => _lastError;
     public static string StatusMessage => _statusMessage;
@@ -29,6 +32,7 @@ internal static class AndroidVpnRuntime
         lock (Gate)
         {
             _lastError = string.Empty;
+            _stopRequested = false;
             _startWaiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var waiter = _startWaiter;
             var registration = cancellationToken.Register(() => waiter.TrySetCanceled(cancellationToken));
@@ -115,10 +119,9 @@ internal static class AndroidVpnRuntime
                 ? new SaeParTunnel.Core.Models.TunnelStartupException(_lastError)
                 : new SaeParTunnel.Core.Models.TunnelValidationException(_lastError));
             _startWaiter = null;
-            _stopWaiter?.TrySetResult(true);
-            _stopWaiter = null;
             handler = StatusChanged;
             args = new AndroidVpnStatusEventArgs("error", _statusMessage, false);
+            _stopRequested = true;
         }
         try { handler?.Invoke(null, args); } catch { }
     }
@@ -130,6 +133,33 @@ internal static class AndroidVpnRuntime
             _startWaiter?.TrySetCanceled();
             _startWaiter = null;
         }
+    }
+
+    public static void ReportServiceCreated() => _isServiceRunning = true;
+
+    public static void ReportServiceStopped()
+    {
+        lock (Gate)
+        {
+            _isServiceRunning = false;
+            _stopRequested = false;
+        }
+        SignalDisconnected();
+    }
+
+    public static bool TryRequestStop()
+    {
+        lock (Gate)
+        {
+            if (_stopRequested) return false;
+            _stopRequested = true;
+            return true;
+        }
+    }
+
+    public static void ResetStopRequest()
+    {
+        lock (Gate) { _stopRequested = false; }
     }
 }
 #endif

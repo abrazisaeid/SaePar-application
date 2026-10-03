@@ -5,6 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- The runtime coordinator is platform-independent; exercise its actual
+         Android source without loading the MAUI app or Android native APIs. -->
+    <DefineConstants>$(DefineConstants);ANDROID</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,6 +23,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="..\..\src\SaeParTunnel.App\Platforms\Android\AndroidVpnRuntime.cs" Link="AndroidVpnRuntime.cs" />
   </ItemGroup>
 
 </Project>
