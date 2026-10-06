@@ -154,6 +154,12 @@ public sealed class MainViewModel : ObservableObject
         AddApplicationCommand = new Command(AddApplication);
         BrowseApplicationCommand = new Command(async () => await RunSafeAsync(BrowseApplicationAsync));
         OpenAndroidVpnSettingsCommand = new Command(async () => await RunSafeAsync(OpenAndroidVpnSettingsAsync));
+        OpenAndroidNotificationSettingsCommand = new Command(() =>
+        {
+#if ANDROID
+            AndroidNotificationPermission.OpenSettings();
+#endif
+        });
         RemoveApplicationCommand = new Command<WhitelistApplication>(RemoveApplication);
         RefreshDiagnosticsCommand = new Command(() => RefreshDiagnosticsReport());
         CopyDiagnosticsCommand = new Command(async () => await RunSafeAsync(CopyDiagnosticsAsync));
@@ -695,6 +701,7 @@ public sealed class MainViewModel : ObservableObject
     public Command AddApplicationCommand { get; }
     public Command BrowseApplicationCommand { get; }
     public Command OpenAndroidVpnSettingsCommand { get; }
+    public Command OpenAndroidNotificationSettingsCommand { get; }
     public Command<WhitelistApplication> RemoveApplicationCommand { get; }
     public Command ResetFiltersCommand { get; }
     public Command ToggleAdvancedConfigToolsCommand { get; }

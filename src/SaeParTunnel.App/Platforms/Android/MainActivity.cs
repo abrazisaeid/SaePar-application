@@ -15,12 +15,18 @@ namespace SaeParTunnel.App;
                            ConfigChanges.ScreenLayout | ConfigChanges.SmallestScreenSize | ConfigChanges.Density)]
 public class MainActivity : MauiAppCompatActivity
 {
-#if SAEPAR_PROBE_DIAGNOSTICS
+#if SAEPAR_PROBE_DIAGNOSTICS || SAEPAR_NOTIFICATION_DIAGNOSTICS
     protected override void OnCreate(global::Android.OS.Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
+#if SAEPAR_PROBE_DIAGNOSTICS
         if (Intent?.GetBooleanExtra("saepar-probe-selftest", false) == true)
             _ = Platforms.Android.AndroidProbeDiagnostics.RunAsync();
+#endif
+#if SAEPAR_NOTIFICATION_DIAGNOSTICS
+        if (Intent?.GetBooleanExtra("saepar-notification-selftest", false) == true)
+            _ = Platforms.Android.AndroidNotificationDiagnostics.RunAsync();
+#endif
     }
 #endif
     private const int VpnPermissionRequestCode = 8241;

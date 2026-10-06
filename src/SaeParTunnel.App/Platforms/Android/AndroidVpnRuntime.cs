@@ -15,6 +15,7 @@ internal static class AndroidVpnRuntime
     private static volatile bool _isConnected;
     private static volatile bool _isServiceRunning;
     private static bool _stopRequested;
+    private static bool _startCancelledByUser;
     private static string _connectedProfileId = string.Empty;
     private static string _lastError = string.Empty;
     private static string _statusMessage = "VPN Android آماده است.";
@@ -26,6 +27,7 @@ internal static class AndroidVpnRuntime
     public static string ConnectedProfileId => _connectedProfileId;
     public static string LastError => _lastError;
     public static string StatusMessage => _statusMessage;
+    public static bool WasStartCancelledByUser { get { lock (Gate) return _startCancelledByUser; } }
 
     public static Task PrepareStartWaitAsync(CancellationToken cancellationToken)
     {
@@ -33,6 +35,7 @@ internal static class AndroidVpnRuntime
         {
             _lastError = string.Empty;
             _stopRequested = false;
+            _startCancelledByUser = false;
             _startWaiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var waiter = _startWaiter;
             var registration = cancellationToken.Register(() => waiter.TrySetCanceled(cancellationToken));
@@ -45,11 +48,11 @@ internal static class AndroidVpnRuntime
     {
         lock (Gate)
         {
-            _stopWaiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var waiter = _stopWaiter;
-            var registration = cancellationToken.Register(() => waiter.TrySetCanceled(cancellationToken));
-            _ = waiter.Task.ContinueWith(_ => registration.Dispose(), TaskScheduler.Default);
-            return waiter.Task;
+            // The app and notification can request shutdown concurrently. Each
+            // caller has its own cancellation; neither may replace the shared
+            // service-destruction acknowledgement or cancel another caller.
+            _stopWaiter ??= new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            return _stopWaiter.Task.WaitAsync(cancellationToken);
         }
     }
 
@@ -97,6 +100,8 @@ internal static class AndroidVpnRuntime
             _isConnected = false;
             _connectedProfileId = string.Empty;
             _statusMessage = "VPN Android قطع است.";
+            _startWaiter?.TrySetCanceled();
+            _startWaiter = null;
             _stopWaiter?.TrySetResult(true);
             _stopWaiter = null;
             handler = StatusChanged;
@@ -133,6 +138,13 @@ internal static class AndroidVpnRuntime
             _startWaiter?.TrySetCanceled();
             _startWaiter = null;
         }
+    }
+
+    public static void MarkUserStopRequested()
+    {
+        lock (Gate) { if (_startWaiter is not null) _startCancelledByUser = true; }
+        TryRequestStop();
+        ReportStatus("disconnecting", "در حال قطع VPN از اعلان...");
     }
 
     public static void ReportServiceCreated() => _isServiceRunning = true;

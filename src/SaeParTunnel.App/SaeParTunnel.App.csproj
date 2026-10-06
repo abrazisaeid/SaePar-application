@@ -11,10 +11,10 @@
     <LangVersion>latest</LangVersion>
     <ApplicationTitle>SaePar Tunnel</ApplicationTitle>
     <ApplicationId>com.saepar.tunnel</ApplicationId>
-    <ApplicationDisplayVersion>2.0.29</ApplicationDisplayVersion>
-    <ApplicationVersion>49</ApplicationVersion>
-    <Version>2.0.29</Version>
-    <PackageVersion>2.0.29</PackageVersion>
+    <ApplicationDisplayVersion>2.0.30</ApplicationDisplayVersion>
+    <ApplicationVersion>50</ApplicationVersion>
+    <Version>2.0.30</Version>
+    <PackageVersion>2.0.30</PackageVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
@@ -22,6 +22,9 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Debug' and '$(SaeParProbeDiagnostics)' == 'true'">
     <DefineConstants>$(DefineConstants);SAEPAR_PROBE_DIAGNOSTICS</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug' and '$(SaeParNotificationDiagnostics)' == 'true'">
+    <DefineConstants>$(DefineConstants);SAEPAR_NOTIFICATION_DIAGNOSTICS</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
     <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>

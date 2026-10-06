@@ -144,6 +144,9 @@ public sealed class AndroidTunnelService : ITunnelService
         var activity = Platform.CurrentActivity as MainActivity
             ?? throw new InvalidOperationException("Android Activity برای درخواست مجوز VPN در دسترس نیست.");
 
+        await AndroidNotificationPermission.RequestForConnectionAsync();
+        cancellationToken.ThrowIfCancellationRequested();
+
         AndroidVpnRuntime.ReportStatus("permission-check", "در حال بررسی مجوز VPN Android...");
         var permissionIntent = VpnService.Prepare(activity);
         if (permissionIntent is not null)
@@ -175,7 +178,8 @@ public sealed class AndroidTunnelService : ITunnelService
             AndroidVpnRuntime.ReportStatus("permission-already-granted", "مجوز VPN قبلاً برای SaePar Tunnel صادر شده؛ Android دیگر پنجره مجوز را نشان نمی‌دهد. در حال اتصال...");
         }
 
-        var xrayJson = await Task.Run(() => _configBuilder.BuildAndroidTun(profile, settings, 1400), cancellationToken);
+        var metricsPort = FindFreeLoopbackPort();
+        var xrayJson = await Task.Run(() => _configBuilder.BuildAndroidTun(profile, settings, 1400, metricsPort), cancellationToken);
         var allowedPackages = settings.EnableWhitelistRouting && !settings.EnableIranBypass
             ? settings.WhitelistApplications
                 .Where(x => x is not null && !string.IsNullOrWhiteSpace(x.PackageName))
@@ -195,6 +199,7 @@ public sealed class AndroidTunnelService : ITunnelService
         intent.PutExtra(SaeParVpnService.ExtraConfigToken, configToken);
         intent.PutExtra(SaeParVpnService.ExtraProfileId, profile.Id);
         intent.PutExtra(SaeParVpnService.ExtraProfileName, profile.DisplayName);
+        intent.PutExtra(SaeParVpnService.ExtraMetricsPort, metricsPort);
         intent.PutExtra(SaeParVpnService.ExtraAllowedPackages, allowedPackages);
 
         try
@@ -209,6 +214,8 @@ public sealed class AndroidTunnelService : ITunnelService
         catch (System.OperationCanceledException)
         {
             await DisconnectAsync(settings, CancellationToken.None);
+            if (AndroidVpnRuntime.WasStartCancelledByUser)
+                throw new System.OperationCanceledException("اتصال از اعلان VPN لغو شد.");
             if (cancellationToken.IsCancellationRequested) throw;
             throw new TimeoutException("راه‌اندازی و تست اینترنت VPN Android بیشتر از 25 ثانیه طول کشید.");
         }

@@ -22,6 +22,9 @@ public sealed class SaeParVpnService : VpnService
     public const string ExtraProfileId = "profile_id";
     public const string ExtraProfileName = "profile_name";
     public const string ExtraAllowedPackages = "allowed_packages";
+    public const string ExtraMetricsPort = "metrics_port";
+    private const string ExtraNotificationSession = "notification_session";
+    private const string ExtraUserDisconnect = "user_disconnect";
 
     private const string NotificationChannelId = "saepar_vpn";
     private const int NotificationId = 42017;
@@ -35,6 +38,18 @@ public sealed class SaeParVpnService : VpnService
     };
 
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
+    private readonly object _notificationGate = new();
+    private readonly CancellationTokenSource _shutdownCts = new();
+    private readonly string _notificationSession = Guid.NewGuid().ToString("N");
+    private CancellationTokenSource? _trafficCts;
+    private Task _trafficTask = Task.CompletedTask;
+    private TrafficSnapshot? _trafficSnapshot;
+    private string _notificationText = "در حال اتصال";
+    private string _notificationProfileName = string.Empty;
+    private bool _trafficUnavailable;
+    private bool _isForeground;
+    private volatile bool _destroyed;
+    private int _disconnectRequested;
     private ParcelFileDescriptor? _vpnInterface;
     private bool _stopping;
 
@@ -48,8 +63,30 @@ public sealed class SaeParVpnService : VpnService
     public override StartCommandResult OnStartCommand(Intent? intent, StartCommandFlags flags, int startId)
     {
         var action = intent?.Action ?? ActionConnect;
+#if SAEPAR_NOTIFICATION_DIAGNOSTICS
+        if (action == ActionNotificationDiagnostic)
+        {
+            lock (_notificationGate) _notificationProfileName = "آزمایش محلی";
+            PromoteToForeground("در حال آزمایش اعلان");
+            _ = Task.Run(() => StartNotificationDiagnosticAsync(
+                intent?.GetStringExtra(ExtraConfigToken) ?? string.Empty,
+                intent?.GetIntExtra(ExtraMetricsPort, 0) ?? 0));
+            return StartCommandResult.NotSticky;
+        }
+#endif
         if (action == ActionDisconnect)
         {
+            var session = intent?.GetStringExtra(ExtraNotificationSession);
+            if (session is not null && session != _notificationSession)
+            {
+                // An action saved from an old notification must never stop a
+                // subsequent connection or leave a newly-created service alive.
+                lock (_notificationGate) { if (!_isForeground) StopSelf(startId); }
+                return StartCommandResult.NotSticky;
+            }
+            if (intent?.GetBooleanExtra(ExtraUserDisconnect, false) == true)
+                AndroidVpnRuntime.MarkUserStopRequested();
+            RequestShutdown();
             PromoteToForeground("در حال قطع اتصال...");
             _ = Task.Run(StopTunnelAsync);
             return StartCommandResult.NotSticky;
@@ -57,6 +94,8 @@ public sealed class SaeParVpnService : VpnService
 
         // Promote immediately. Service work is intentionally moved off Android's
         // main thread to avoid ANR while libXray parses/starts the native core.
+        lock (_notificationGate)
+            _notificationProfileName = CleanProfileName(intent?.GetStringExtra(ExtraProfileName));
         PromoteToForeground("در حال برقراری VPN...");
         AndroidVpnRuntime.ReportStatus("service-running", "سرویس VPN اجرا شد؛ در حال آماده‌سازی رابط TUN...");
 
@@ -64,19 +103,24 @@ public sealed class SaeParVpnService : VpnService
         var profileId = intent?.GetStringExtra(ExtraProfileId) ?? string.Empty;
         var profileName = intent?.GetStringExtra(ExtraProfileName) ?? "SaePar Tunnel";
         var allowedPackages = intent?.GetStringArrayExtra(ExtraAllowedPackages) ?? Array.Empty<string>();
+        var metricsPort = intent?.GetIntExtra(ExtraMetricsPort, 0) ?? 0;
 
-        _ = Task.Run(() => StartTunnelAsync(configToken, profileId, profileName, allowedPackages));
+        _ = Task.Run(() => StartTunnelAsync(configToken, profileId, profileName, allowedPackages, metricsPort));
         return StartCommandResult.NotSticky;
     }
 
     public override void OnRevoke()
     {
+        RequestShutdown();
         _ = Task.Run(StopTunnelAsync);
         base.OnRevoke();
     }
 
     public override void OnDestroy()
     {
+        _destroyed = true;
+        RequestShutdown();
+        lock (_notificationGate) _isForeground = false;
         // Native start/stop may hold the Java bridge lock. Never wait for that
         // lock on Android's main thread; acknowledge shutdown after cleanup.
         _ = Task.Run(FinalizeDestroyedServiceAsync);
@@ -99,11 +143,12 @@ public sealed class SaeParVpnService : VpnService
         }
     }
 
-    private async Task StartTunnelAsync(string configToken, string profileId, string profileName, string[] allowedPackages)
+    private async Task StartTunnelAsync(string configToken, string profileId, string profileName, string[] allowedPackages, int metricsPort)
     {
         await _lifecycleGate.WaitAsync().ConfigureAwait(false);
         try
         {
+            _shutdownCts.Token.ThrowIfCancellationRequested();
             _stopping = false;
             await StopCoreAndInterfaceOnlyAsync().ConfigureAwait(false);
 
@@ -223,9 +268,10 @@ public sealed class SaeParVpnService : VpnService
             AndroidVpnRuntime.ReportStatus(
                 "data-plane-check",
                 "VPN و Xray آماده‌اند؛ در حال تست عبور واقعی اینترنت از TUN...");
-            UpdateNotification($"در حال تست اینترنت • {profileName}");
+            UpdateNotification("در حال بررسی اتصال");
 
-            var validation = await ValidateTunnelTrafficAsync().ConfigureAwait(false);
+            var validation = await ValidateTunnelTrafficAsync(_shutdownCts.Token).ConfigureAwait(false);
+            _shutdownCts.Token.ThrowIfCancellationRequested();
             if (validation.Success)
             {
                 AndroidVpnRuntime.ReportStatus(
@@ -234,7 +280,8 @@ public sealed class SaeParVpnService : VpnService
                     null,
                     profileId);
                 AndroidVpnRuntime.SignalConnected(profileId);
-                UpdateNotification($"متصل و تست‌شده • {profileName}");
+                UpdateNotification("متصل");
+                if (metricsPort != 0) StartTrafficUpdates(metricsPort);
                 return;
             }
 
@@ -242,14 +289,20 @@ public sealed class SaeParVpnService : VpnService
             AndroidVpnRuntime.SignalError(
                 $"تست اینترنت از VPN تأیید نشد • fd={tunFd} • TUN={tunAddress}/32 • DNS={tunDns}: " + validation.Message,
                 startupFailure: false);
-            StopForeground(StopForegroundFlags.Remove);
+            RemoveForegroundNotification();
+            StopSelf();
+        }
+        catch (Exception) when (_shutdownCts.IsCancellationRequested)
+        {
+            try { await StopCoreAndInterfaceOnlyAsync().ConfigureAwait(false); } catch { }
+            RemoveForegroundNotification();
             StopSelf();
         }
         catch (Exception ex)
         {
             try { await StopCoreAndInterfaceOnlyAsync().ConfigureAwait(false); } catch { }
             AndroidVpnRuntime.SignalError(ex.Message);
-            StopForeground(StopForegroundFlags.Remove);
+            RemoveForegroundNotification();
             StopSelf();
         }
         finally
@@ -266,7 +319,7 @@ public sealed class SaeParVpnService : VpnService
             if (_stopping) return;
             _stopping = true;
             await StopCoreAndInterfaceOnlyAsync().ConfigureAwait(false);
-            StopForeground(StopForegroundFlags.Remove);
+            RemoveForegroundNotification();
             StopSelf();
         }
         finally
@@ -275,50 +328,56 @@ public sealed class SaeParVpnService : VpnService
         }
     }
 
-    private Task StopCoreAndInterfaceOnlyAsync()
+    private async Task StopCoreAndInterfaceOnlyAsync()
     {
+        await StopTrafficUpdatesAsync().ConfigureAwait(false);
         try { SaeParXrayBridge.DetachTun(); } catch { }
         try { _vpnInterface?.Close(); } catch { }
         _vpnInterface?.Dispose();
         _vpnInterface = null;
-        return Task.CompletedTask;
     }
 
 
-    private static async Task<(bool Success, string Message)> ValidateTunnelTrafficAsync()
+    private static async Task<(bool Success, string Message)> ValidateTunnelTrafficAsync(CancellationToken cancellationToken)
     {
+        using var validationCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         // Run probes in parallel so a blocked or slow validation endpoint does not
         // keep the UI stuck on "testing internet" while another endpoint is healthy.
-        var tcpTask = ProbeTcpAsync();
-        var pendingHttp = ValidationEndpoints.Select(ProbeHttpAsync).ToList();
+        var tcpTask = ProbeTcpAsync(validationCts.Token);
+        var pendingHttp = ValidationEndpoints.Select(endpoint => ProbeHttpAsync(endpoint, validationCts.Token)).ToList();
         var errors = new List<string>();
-
-        while (pendingHttp.Count > 0)
+        try
         {
-            var completed = await Task.WhenAny(pendingHttp).ConfigureAwait(false);
-            pendingHttp.Remove(completed);
-            var result = await completed.ConfigureAwait(false);
-            if (result.Success)
+            while (pendingHttp.Count > 0)
             {
-                var tcpProbeResult = tcpTask.IsCompleted
-                    ? await tcpTask.ConfigureAwait(false)
-                    : "TCP 1.1.1.1:443=در حال بررسی";
-                return (true, $"{tcpProbeResult}; {result.Message}");
+                var completed = await Task.WhenAny(pendingHttp).ConfigureAwait(false);
+                pendingHttp.Remove(completed);
+                var result = await completed.ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (result.Success)
+                {
+                    var tcpProbeResult = tcpTask.IsCompleted
+                        ? await tcpTask.ConfigureAwait(false)
+                        : "TCP 1.1.1.1:443=در حال بررسی";
+                    return (true, $"{tcpProbeResult}; {result.Message}");
+                }
+
+                errors.Add(result.Message);
             }
 
-            errors.Add(result.Message);
+            var tcpResult = await tcpTask.ConfigureAwait(false);
+            return (false, tcpResult + " | " + string.Join(" | ", errors));
         }
-
-        var tcpResult = await tcpTask.ConfigureAwait(false);
-        return (false, tcpResult + " | " + string.Join(" | ", errors));
+        finally { validationCts.Cancel(); }
     }
 
-    private static async Task<string> ProbeTcpAsync()
+    private static async Task<string> ProbeTcpAsync(CancellationToken cancellationToken)
     {
         try
         {
             using var tcp = new System.Net.Sockets.TcpClient();
-            using var tcpCts = new CancellationTokenSource(ValidationTcpTimeout);
+            using var tcpCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            tcpCts.CancelAfter(ValidationTcpTimeout);
             await tcp.ConnectAsync("1.1.1.1", 443, tcpCts.Token).ConfigureAwait(false);
             return "TCP 1.1.1.1:443=OK";
         }
@@ -328,7 +387,7 @@ public sealed class SaeParVpnService : VpnService
         }
     }
 
-    private static async Task<(bool Success, string Message)> ProbeHttpAsync(string endpoint)
+    private static async Task<(bool Success, string Message)> ProbeHttpAsync(string endpoint, CancellationToken cancellationToken)
     {
         var host = new System.Uri(endpoint).Host;
         try
@@ -345,7 +404,7 @@ public sealed class SaeParVpnService : VpnService
             using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
             using var response = await client.SendAsync(
                 request,
-                HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
 
             var code = (int)response.StatusCode;
             return code == 204
@@ -434,11 +493,19 @@ public sealed class SaeParVpnService : VpnService
 
     private void PromoteToForeground(string text)
     {
-        var notification = BuildNotification(text);
-        if (Build.VERSION.SdkInt >= BuildVersionCodes.UpsideDownCake)
-            StartForeground(NotificationId, notification, ForegroundService.TypeSpecialUse);
-        else
-            StartForeground(NotificationId, notification);
+        lock (_notificationGate)
+        {
+            if (_destroyed) return;
+            _notificationText = text;
+            _trafficSnapshot = null;
+            _trafficUnavailable = false;
+            var notification = BuildNotification();
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.UpsideDownCake)
+                StartForeground(NotificationId, notification, ForegroundService.TypeSpecialUse);
+            else
+                StartForeground(NotificationId, notification);
+            _isForeground = true;
+        }
     }
 
     private void EnsureNotificationChannel()
@@ -453,7 +520,7 @@ public sealed class SaeParVpnService : VpnService
         manager?.CreateNotificationChannel(channel);
     }
 
-    private Notification BuildNotification(string text)
+    private Notification BuildNotification()
     {
         var launchIntent = PackageManager?.GetLaunchIntentForPackage(PackageName);
         var launchPending = launchIntent is null ? null : PendingIntent.GetActivity(
@@ -466,13 +533,48 @@ public sealed class SaeParVpnService : VpnService
             ? new Notification.Builder(this, NotificationChannelId)
             : new Notification.Builder(this);
 
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.S)
+            builder.SetForegroundServiceBehavior((int)NotificationForegroundService.Immediate);
+
         builder
-            .SetContentTitle("SaePar Tunnel")
-            .SetContentText(text)
-            .SetSmallIcon(global::Android.Resource.Drawable.IcDialogInfo)
+            .SetContentTitle("SaePar Tunnel • " + _notificationText)
+            .SetContentText(_trafficSnapshot is { } traffic ? RateLine(traffic)
+                : _trafficUnavailable ? "آمار موقتاً در دسترس نیست" : _notificationProfileName)
+            .SetSmallIcon(global::SaeParTunnel.App.Resource.Drawable.ic_stat_saepar)
             .SetOngoing(true)
             .SetCategory(Notification.CategoryService)
-            .SetOnlyAlertOnce(true);
+            .SetOnlyAlertOnce(true)
+            .SetShowWhen(false)
+            .SetVisibility(NotificationVisibility.Private);
+
+        var expanded = _notificationText;
+        if (!string.IsNullOrWhiteSpace(_notificationProfileName)) expanded += "\nسرور: " + _notificationProfileName;
+        if (_trafficSnapshot is { } snapshot)
+        {
+            expanded += "\n" + RateLine(snapshot)
+                + "\nحجم ارسال: " + Ltr(XrayTrafficClient.FormatBytes(snapshot.SentBytes))
+                + "\nحجم دریافت: " + Ltr(XrayTrafficClient.FormatBytes(snapshot.ReceivedBytes));
+        }
+        else if (_trafficUnavailable) expanded += "\nآمار موقتاً در دسترس نیست";
+        builder.SetStyle(new Notification.BigTextStyle().BigText(expanded));
+
+        if (Volatile.Read(ref _disconnectRequested) == 0)
+        {
+            var stopIntent = new Intent(this, typeof(SaeParVpnService));
+            stopIntent.SetAction(ActionDisconnect);
+            stopIntent.SetData(global::Android.Net.Uri.Parse("saepar://disconnect/" + _notificationSession));
+            stopIntent.PutExtra(ExtraNotificationSession, _notificationSession);
+            stopIntent.PutExtra(ExtraUserDisconnect, true);
+            var stopPending = PendingIntent.GetService(this, 103, stopIntent,
+                PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
+            if (stopPending is not null)
+            {
+                using var actionIcon = global::Android.Graphics.Drawables.Icon.CreateWithResource(
+                    this, global::SaeParTunnel.App.Resource.Drawable.ic_stat_saepar);
+                builder.AddAction(new Notification.Action.Builder(
+                    actionIcon, "قطع VPN", stopPending).Build());
+            }
+        }
 
         if (launchPending is not null)
             builder.SetContentIntent(launchPending);
@@ -482,8 +584,125 @@ public sealed class SaeParVpnService : VpnService
 
     private void UpdateNotification(string text)
     {
-        var manager = (NotificationManager?)GetSystemService(NotificationService);
-        manager?.Notify(NotificationId, BuildNotification(text));
+        lock (_notificationGate)
+        {
+            if (!_isForeground || _destroyed || Volatile.Read(ref _disconnectRequested) != 0) return;
+            _notificationText = text;
+            NotifyLocked();
+        }
     }
+
+    private void NotifyLocked()
+        => ((NotificationManager?)GetSystemService(NotificationService))?.Notify(NotificationId, BuildNotification());
+
+    private void RemoveForegroundNotification()
+    {
+        lock (_notificationGate)
+        {
+            _isForeground = false;
+            _trafficSnapshot = null;
+            StopForeground(StopForegroundFlags.Remove);
+        }
+    }
+
+    private void RequestShutdown()
+    {
+        Interlocked.Exchange(ref _disconnectRequested, 1);
+        _shutdownCts.Cancel();
+        lock (_notificationGate) _trafficCts?.Cancel();
+    }
+
+    private void StartTrafficUpdates(int metricsPort)
+    {
+        lock (_notificationGate)
+        {
+            if (_destroyed || !_isForeground || Volatile.Read(ref _disconnectRequested) != 0) return;
+            var cts = new CancellationTokenSource();
+            _trafficCts = cts;
+            _trafficTask = Task.Run(() => RunTrafficUpdatesAsync(metricsPort, cts.Token));
+        }
+    }
+
+    private async Task RunTrafficUpdatesAsync(int metricsPort, CancellationToken cancellationToken)
+    {
+        using var client = new XrayTrafficClient(metricsPort);
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var tracker = new TrafficRateTracker();
+        do
+        {
+            TrafficSnapshot? sample = null;
+            try { sample = tracker.Update(await client.ReadAsync(cancellationToken).ConfigureAwait(false), watch.Elapsed); }
+            catch (System.OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            catch (Exception) { /* A failed statistics read is not a VPN failure. */ }
+            lock (_notificationGate)
+            {
+                if (cancellationToken.IsCancellationRequested || !_isForeground || _destroyed ||
+                    Volatile.Read(ref _disconnectRequested) != 0) break;
+                _trafficSnapshot = sample;
+                _trafficUnavailable = sample is null;
+                try { NotifyLocked(); } catch (Exception) { /* Notifications may be disabled by the user. */ }
+            }
+        } while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false));
+    }
+
+    private async Task StopTrafficUpdatesAsync()
+    {
+        CancellationTokenSource? cts;
+        Task task;
+        lock (_notificationGate)
+        {
+            cts = _trafficCts;
+            task = _trafficTask;
+            _trafficCts = null;
+            _trafficTask = Task.CompletedTask;
+            cts?.Cancel();
+        }
+        try { await task.ConfigureAwait(false); } catch (Exception) { }
+        finally { cts?.Dispose(); }
+    }
+
+    private static string Ltr(string value) => "\u2066" + value + "\u2069";
+    private static string RateLine(TrafficSnapshot sample) => Ltr(
+        "↑ " + XrayTrafficClient.FormatBytes(sample.SendBytesPerSecond) + "/s    ↓ "
+        + XrayTrafficClient.FormatBytes(sample.ReceiveBytesPerSecond) + "/s");
+    private static string CleanProfileName(string? name)
+    {
+        var text = (name ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return text.Length > 80 ? text[..80] : text;
+    }
+
+#if SAEPAR_NOTIFICATION_DIAGNOSTICS
+    internal const string ActionNotificationDiagnostic = "com.saepar.tunnel.action.LOCAL_NOTIFICATION_TEST";
+    internal static TaskCompletionSource<bool> NotificationDiagnosticReady { get; set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    // Debug opt-in only. Runs a loopback-only SOCKS configuration without
+    // establishing a VPN or contacting public servers. Production has no hook.
+    private async Task StartNotificationDiagnosticAsync(string token, int metricsPort)
+    {
+        await _lifecycleGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var store = new TunnelConfigurationStore(Path.Combine(Microsoft.Maui.Storage.FileSystem.CacheDirectory, "vpn-start"));
+            var config = await store.ConsumeAsync(token).ConfigureAwait(false);
+            var response = SaeParXrayBridge.Invoke(System.Text.Json.JsonSerializer.Serialize(new
+            {
+                apiVersion = 1, method = "runXrayFromJson", payload = new { configJSON = config }
+            }));
+            EnsureLibXraySuccess(response, "آزمایش محلی");
+            UpdateNotification("متصل");
+            StartTrafficUpdates(metricsPort);
+            NotificationDiagnosticReady.TrySetResult(true);
+        }
+        catch (Exception ex)
+        {
+            NotificationDiagnosticReady.TrySetException(ex);
+            await StopCoreAndInterfaceOnlyAsync().ConfigureAwait(false);
+            RemoveForegroundNotification();
+            StopSelf();
+        }
+        finally { _lifecycleGate.Release(); }
+    }
+#endif
 }
 #endif

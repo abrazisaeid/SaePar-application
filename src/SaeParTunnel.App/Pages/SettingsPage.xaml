@@ -13,6 +13,7 @@
                     <Button Text="سایت‌های ایرانی و مسیر VPN" Clicked="OpenAdvancedPage" CommandParameter="advanced-whitelist" IsEnabled="{Binding IsNotBusy}" />
                     <Button Text="عیب‌یابی اتصال" Clicked="OpenAdvancedPage" CommandParameter="advanced-diagnostics" IsEnabled="{Binding IsNotBusy}" />
                     <Button Text="تنظیمات VPN اندروید" Command="{Binding OpenAndroidVpnSettingsCommand}" IsVisible="{Binding IsAndroid}" IsEnabled="{Binding IsNotBusy}" />
+                    <Button Text="اعلان VPN و نمایش مصرف" Command="{Binding OpenAndroidNotificationSettingsCommand}" IsVisible="{Binding IsAndroid}" />
                 </VerticalStackLayout>
             </Border>
             <Border Style="{StaticResource Card}">

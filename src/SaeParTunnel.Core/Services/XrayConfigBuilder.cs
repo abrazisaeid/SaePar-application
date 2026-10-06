@@ -74,14 +74,15 @@ public sealed class XrayConfigBuilder
     /// root env key xray.tun.fd immediately before core startup. Application whitelisting is enforced by VpnService.Builder;
     /// website whitelisting remains an Xray routing concern.
     /// </summary>
-    public string BuildAndroidTun(ConfigProfile profile, AppSettings settings, int mtu = 1500)
+    public string BuildAndroidTun(ConfigProfile profile, AppSettings settings, int mtu = 1500, int metricsPort = 0)
     {
-        return BuildMobileTun(
+        var json = BuildMobileTun(
             profile,
             settings,
             mtu,
             "saepar0",
             "android-whitelist-websites");
+        return metricsPort == 0 ? json : XrayTrafficClient.EnableMetrics(json, metricsPort);
     }
 
     /// <summary>

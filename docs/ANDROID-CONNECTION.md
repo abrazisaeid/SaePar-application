@@ -1,5 +1,45 @@
 # Android connection recovery (2.0.24)
 
+## Live VPN notification (2.0.30)
+
+Android's foreground notification shows connection/startup/validation/shutdown
+state, the selected server, upload/download rates, and session byte totals in its
+expanded view. Rates are sampled every second from the native core's `proxy`
+outbound counters; `direct` (including Iran bypass), metrics requests, and blocked
+traffic are excluded. This indicates VPN service state, not a continuous proof
+that every destination on the internet is reachable.
+
+`BuildAndroidTun` enables outbound statistics and a metrics listener on an
+ephemeral `127.0.0.1` port. A managed HTTP client reads `/debug/vars`, with no
+proxy/redirects, a two-second timeout, cancellation, and a 256 KB response bound.
+No additional native or gRPC library is required. Monotonic elapsed time determines
+rates; a missing response shows unavailable statistics, and a counter reset cannot
+produce a negative rate. Polling uses no native bridge lock or persistent writes.
+
+The immutable Disconnect action targets the VPN service directly and is scoped
+to the current service instance. It cancels pending validation as well as active
+traffic monitoring. All publication/removal uses one lock; shutdown cancels and
+awaits the polling task before stopping Xray, so stale ticks cannot repost the
+notification. App/notification shutdown callers share one destruction
+acknowledgement with independent cancellation. User cancellation during startup
+does not trigger another server attempt or a timeout error.
+
+Android 13+ requests notification permission on first connection. Denying it
+does not prevent VPN use or cause repeated dialogs. Advanced → VPN notifications
+opens Android's notification settings to enable it later. The status-bar icon is
+a transparent white SP vector, not the system information symbol.
+
+The opt-in Debug property `SaeParNotificationDiagnostics=true` and activity extra
+`saepar-notification-selftest` run a local-only device fixture. It transfers known
+byte counts over SOCKS to a loopback listener, inspects the actual notification,
+sends its Disconnect PendingIntent, and verifies core/service termination and no
+notification repost. Its configuration blocks all non-loopback destinations and
+creates no TUN. These hooks are absent from Release.
+
+References: [Xray metrics](https://xtls.github.io/en/config/metrics.html),
+[statistics](https://xtls.github.io/en/config/stats.html), and
+[Android notification permission](https://developer.android.com/develop/ui/views/notifications/notification-permission).
+
 ## Launcher icon (2.0.29)
 
 The application manifest now explicitly references `@mipmap/appicon` and

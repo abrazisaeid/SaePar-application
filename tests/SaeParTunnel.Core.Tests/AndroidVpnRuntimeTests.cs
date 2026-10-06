@@ -43,6 +43,39 @@ public sealed class AndroidVpnRuntimeTests : IDisposable
     }
 
     [Fact]
+    public async Task NotificationStopDuringStartupCancelsOnlyAfterServiceDestruction()
+    {
+        var startup = AndroidVpnRuntime.PrepareStartWaitAsync(CancellationToken.None);
+        AndroidVpnRuntime.ReportServiceCreated();
+        AndroidVpnRuntime.MarkUserStopRequested();
+        Assert.True(AndroidVpnRuntime.WasStartCancelledByUser);
+        Assert.False(startup.IsCompleted);
+        AndroidVpnRuntime.ReportServiceStopped();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => startup);
+        Assert.False(AndroidVpnRuntime.IsConnected);
+        var next = AndroidVpnRuntime.PrepareStartWaitAsync(CancellationToken.None);
+        Assert.False(AndroidVpnRuntime.WasStartCancelledByUser);
+        AndroidVpnRuntime.SignalConnected("next");
+        await next;
+    }
+
+    [Fact]
+    public async Task ConcurrentStopWaitersShareCleanupButNotCancellation()
+    {
+        AndroidVpnRuntime.ReportServiceCreated();
+        using var cts = new CancellationTokenSource();
+        var cancelled = AndroidVpnRuntime.PrepareStopWaitAsync(cts.Token);
+        var app = AndroidVpnRuntime.PrepareStopWaitAsync(CancellationToken.None);
+        var notification = AndroidVpnRuntime.PrepareStopWaitAsync(CancellationToken.None);
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+        Assert.False(app.IsCompleted);
+        Assert.False(notification.IsCompleted);
+        AndroidVpnRuntime.ReportServiceStopped();
+        await Task.WhenAll(app, notification).WaitAsync(TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
     public void ShutdownCommandIsSentOnceAndCanBeRetriedIfSendingFailed()
     {
         AndroidVpnRuntime.ReportServiceCreated();
