@@ -1,5 +1,21 @@
 # Android connection recovery (2.0.24)
 
+## Launcher icon (2.0.29)
+
+The application manifest now explicitly references `@mipmap/appicon` and
+`@mipmap/appicon_round`. Previously the packaged manifest had no icon reference,
+so the phone launcher displayed Android's default application icon even though
+MAUI had generated the logo resources.
+
+The icon now has a full-bleed solid background and a centered, transparent SP
+foreground. Android scales only the foreground to 0.78 for its adaptive masks.
+The generated monochrome layer uses that transparent glyph, avoiding the opaque
+rounded rectangle that previously concealed the logo in themed icons. Windows
+and iOS retain the normal foreground size.
+
+References: [MAUI app icons](https://learn.microsoft.com/en-us/dotnet/maui/user-interface/images/app-icons?tabs=android)
+and [Android adaptive icons](https://developer.android.com/develop/ui/views/launch/icon_design_adaptive).
+
 ## Transactional archive and isolated probes (2.0.28)
 
 `profiles.db` now stores one complete profile per SQLite row. The first load

@@ -11,10 +11,10 @@
     <LangVersion>latest</LangVersion>
     <ApplicationTitle>SaePar Tunnel</ApplicationTitle>
     <ApplicationId>com.saepar.tunnel</ApplicationId>
-    <ApplicationDisplayVersion>2.0.28</ApplicationDisplayVersion>
-    <ApplicationVersion>48</ApplicationVersion>
-    <Version>2.0.28</Version>
-    <PackageVersion>2.0.28</PackageVersion>
+    <ApplicationDisplayVersion>2.0.29</ApplicationDisplayVersion>
+    <ApplicationVersion>49</ApplicationVersion>
+    <Version>2.0.29</Version>
+    <PackageVersion>2.0.29</PackageVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
@@ -43,7 +43,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <MauiIcon Include="Resources\AppIcon\appicon.svg" Color="#0B1220" />
+    <!-- Keep the glyph transparent for Android's monochrome layer. Android
+         masks the full-bleed background; the foreground stays in the safe area. -->
+    <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#0B1220">
+      <ForegroundScale Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">0.78</ForegroundScale>
+    </MauiIcon>
     <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#0B1220" BaseSize="128,128" />
   </ItemGroup>
 
