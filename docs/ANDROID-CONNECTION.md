@@ -1,5 +1,20 @@
 # Android connection recovery (2.0.24)
 
+## Restart discovery while connected (2.0.33)
+
+The Android home screen has a Find replacement server button below Disconnect
+whenever the VPN is connected. It starts the same physical-network discovery
+without asking the after-connect question again, including when that question
+was declined. Discovery fills the list to ten recently verified servers; if ten
+are already ready, it reports that they are available without starting more tests.
+The existing three-minute limit, per-success persistence, Stop test button and
+immediate Disconnect action still apply.
+
+The button is disabled during connection changes, ping, initialization or another
+search. Both the manual action and the after-connect prompt recheck availability
+and the connection generation before starting, so a delayed prompt cannot start
+a second search. Disconnected search and routing-edit guards stay separate.
+
 ## Hide unresponsive home servers (2.0.32)
 
 A completed failed probe removes a previously verified configuration from the

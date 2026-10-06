@@ -26,6 +26,10 @@
                             IsEnabled="{Binding CanConnectHome}" HeightRequest="56" CornerRadius="16" Style="{StaticResource PrimaryButton}" />
                     <Button Text="قطع اتصال" Command="{Binding DisconnectCommand}" IsVisible="{Binding ShowDisconnectAction}"
                             IsEnabled="{Binding CanStopConnection}" HeightRequest="56" CornerRadius="16" Style="{StaticResource DangerButton}" />
+                    <Button Text="پیدا کردن سرور جایگزین" Command="{Binding FindConnectedServersCommand}"
+                            IsVisible="{Binding ShowConnectedSearchAction}" IsEnabled="{Binding CanFindConnectedServers}"
+                            HeightRequest="52" CornerRadius="16"
+                            SemanticProperties.Description="جست‌وجوی دوبارهٔ سرورها بدون قطع اتصال VPN، تا ۱۰ سرور سالم" />
 
                     <VerticalStackLayout Spacing="8" IsVisible="{Binding HasHomeServers}">
                         <Label Text="سرورهای ذخیره‌شده" FontAttributes="Bold" />

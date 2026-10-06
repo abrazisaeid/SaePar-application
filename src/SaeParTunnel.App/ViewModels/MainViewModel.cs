@@ -101,6 +101,14 @@ public sealed class MainViewModel : ObservableObject
 
         GetConfigCommand = new Command(async () => await RunSafeAsync(GetConfigAsync));
         FindServersCommand = new Command(async () => await RunSafeAsync(FindServersAsync));
+        FindConnectedServersCommand = new Command(async () =>
+        {
+#if ANDROID
+            if (!CanFindConnectedServers) return;
+            var generation = _connectionGeneration;
+            await RunSafeAsync(() => FindConnectedServersAsync(generation));
+#endif
+        });
         SelectHomeServerCommand = new Command<ConfigProfile>(profile =>
         {
             if (CanSelectHomeServer && profile is not null) SelectedHealthyProfile = profile;
@@ -305,6 +313,7 @@ public sealed class MainViewModel : ObservableObject
     }
     public bool IsNotBusy => !IsBusy;
     public Command FindServersCommand { get; }
+    public Command FindConnectedServersCommand { get; }
     public Command PingSelectedServerCommand { get; }
     public Command CleanupOldServersCommand { get; }
     public Command ViewFailedServersCommand { get; }
@@ -322,6 +331,9 @@ public sealed class MainViewModel : ObservableObject
     public bool ShowHomeConnectAction => !IsConnected && (HasHomeServers || IsConnectionBusy);
     public bool CanCancelHomeSearch => _findingServers || IsTesting;
     public bool CanSearchServers => CanStartConnection && !_findingServers;
+    public bool ShowConnectedSearchAction => DeviceInfo.Platform == DevicePlatform.Android && IsConnected;
+    public bool CanFindConnectedServers => ShowConnectedSearchAction && !_isInitializing && IsNotBusy &&
+        !IsConnectionBusy && !_findingServers && !IsTesting && !_waitingForTests;
     public bool CanConnectHome => !_isInitializing && !_waitingForTests && !IsConnected && !IsConnectionBusy &&
         (IsNotBusy || IsTesting || _findingServers) && SelectedHealthyProfile is not null && CanTunnel;
     public string SearchServersLabel => HasHomeServers ? "جست‌وجوی دوبارهٔ سرورها" : "پیدا کردن سرور";
@@ -345,6 +357,7 @@ public sealed class MainViewModel : ObservableObject
     private void NotifyHomeChanged()
     {
         foreach (var name in new[] { nameof(HasHomeServers), nameof(CanSearchServers), nameof(CanConnectHome),
+            nameof(ShowConnectedSearchAction), nameof(CanFindConnectedServers),
             nameof(SearchServersLabel), nameof(HomeConnectionTitle), nameof(HomeHint), nameof(HomeSearchProgress), nameof(CanCancelHomeSearch), nameof(ShowHomeConnectAction),
             nameof(CanPingSelectedServer), nameof(PingButtonText), nameof(PingFeedback), nameof(HasPingFeedback) })
             OnPropertyChanged(name);
@@ -2121,14 +2134,14 @@ public sealed class MainViewModel : ObservableObject
         // their existing discovery behavior until they have an equivalent path.
 #if ANDROID
         var generation = _connectionGeneration;
-        if (!IsConnected || Shell.Current is null || IsBusy || _findingServers ||
+        if (!CanFindConnectedServers || Shell.Current is null ||
             ConnectedDiscoveryPolicy.CountReady(Profiles, DateTime.Now) >= ConnectedDiscoveryPolicy.HealthyTarget) return;
         try
         {
             var accepted = await Shell.Current.DisplayAlert("سرور جایگزین پیدا کنم؟",
                 "اتصال برقرار شد. جست‌وجو را از اینترنت مستقیم گوشی ادامه بدهم تا در مجموع ۱۰ سرور سالم داشته باشی؟ تا ۳ دقیقه جست‌وجو می‌کنیم و هر وقت خواستی می‌توانی متوقفش کنی.",
                 "بله، ادامه بده", "فعلاً نه");
-            if (!accepted || !IsConnected || generation != _connectionGeneration || IsBusy || _findingServers) return;
+            if (!accepted || !CanFindConnectedServers || generation != _connectionGeneration) return;
             await FindConnectedServersAsync(generation);
         }
         catch (Exception ex)
@@ -2143,6 +2156,7 @@ public sealed class MainViewModel : ObservableObject
 #if ANDROID
     private async Task FindConnectedServersAsync(long generation)
     {
+        if (!CanFindConnectedServers || generation != _connectionGeneration) return;
         using var network = AndroidDirectNetwork.BeginScope();
         using var discovery = new CancellationTokenSource(ConnectedDiscoveryPolicy.Budget);
         _discoveryCts = discovery;
