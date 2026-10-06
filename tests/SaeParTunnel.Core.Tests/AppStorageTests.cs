@@ -90,7 +90,7 @@ public sealed class AppStorageTests : IDisposable
         var profiles = Profiles();
         var store = new MauiJsonStore(_directory);
         await store.SaveProfilesAsync(profiles);
-        using var lockedArchive = File.Open(Path.Combine(_directory, "profiles.json"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        using var lockedArchive = File.Open(Path.Combine(_directory, "profiles.db"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         var home = await new MauiJsonStore(_directory).LoadHomeServersAsync();
         Assert.Equal(5, home.Count);
         Assert.Equal(profiles.Select(p => p.Id).Order(), home.Select(p => p.Id).Order());

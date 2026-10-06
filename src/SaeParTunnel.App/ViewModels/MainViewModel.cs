@@ -386,8 +386,9 @@ public sealed class MainViewModel : ObservableObject
             _pingFeedback = result.Success && result.LatencyMs.HasValue
                 ? "پینگ همین الان به‌روز شد."
                 : "پاسخی دریافت نشد؛ می‌توانی دوباره امتحان کنی.";
-            await ApplyAutomaticCleanupAsync();
-            await _store.SaveProfilesAsync(Profiles);
+            var removed = await ApplyAutomaticCleanupAsync();
+            if (removed > 0) await _store.SaveProfilesAsync(Profiles);
+            else await _store.SaveProfileAsync(profile, Profiles);
             RefreshFilters();
             RefreshStats();
         }
@@ -427,9 +428,9 @@ public sealed class MainViewModel : ObservableObject
         return removable.Count;
     }
 
-    private async Task ApplyAutomaticCleanupAsync()
+    private async Task<int> ApplyAutomaticCleanupAsync()
     {
-        if (Settings.AutoCleanupOldServers) await RemoveOldFailedProfilesAsync();
+        return Settings.AutoCleanupOldServers ? await RemoveOldFailedProfilesAsync() : 0;
     }
 
     private async Task PersistFinishedTestRunAsync()
@@ -1596,7 +1597,7 @@ public sealed class MainViewModel : ObservableObject
                 });
                 if (newHealth == ProfileHealth.Working)
                 {
-                    await _store.SaveProfilesAsync(Profiles);
+                    await _store.SaveProfileAsync(profile, Profiles);
                     await MainThread.InvokeOnMainThreadAsync(RefreshStats);
                 }
             }
@@ -1823,7 +1824,7 @@ public sealed class MainViewModel : ObservableObject
                         MaybeUpdateProgress(sw, done, done == ProgressTotal);
                     });
                     if (newHealth == ProfileHealth.Working)
-                        await _store.SaveProfilesAsync(Profiles);
+                        await _store.SaveProfileAsync(p, Profiles);
                 }
                 catch (OperationCanceledException)
                 {

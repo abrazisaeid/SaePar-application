@@ -17,7 +17,7 @@ namespace SaeParTunnel.App.Platforms.Android;
 
 public sealed class AndroidTunnelService : ITunnelService
 {
-    private static readonly BoundedOperationGate LibXrayTestGate = new();
+    private static readonly AndroidProbeProcess ProbeProcess = new();
     private readonly EndpointPrecheckService _precheck;
     private readonly XrayConfigBuilder _configBuilder;
 
@@ -73,52 +73,14 @@ public sealed class AndroidTunnelService : ITunnelService
 
         try
         {
-            return await LibXrayTestGate.RunAsync(async () =>
-            {
-                string? path = null;
-                try
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    SaeParXrayBridge.Initialize();
-
-                    var socksPort = FindFreeLoopbackPort();
-                    var config = _configBuilder.BuildAndroidProbe(profile, socksPort);
-                    path = Path.Combine(FileSystem.CacheDirectory, $"saepar-probe-{Guid.NewGuid():N}.json");
-                    await File.WriteAllTextAsync(path, config, cancellationToken).ConfigureAwait(false);
-
-                    var timeout = settings.FastTestMode ? 4 : 7;
-                    var request = JsonSerializer.Serialize(new
-                    {
-                        apiVersion = 1,
-                        method = "ping",
-                        payload = new
-                        {
-                            configPath = path,
-                            timeout,
-                            url = "https://cp.cloudflare.com/",
-                            proxy = $"socks5://127.0.0.1:{socksPort}"
-                        }
-                    });
-
-                    var response = SaeParXrayBridge.Invoke(request);
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    return ParsePingResponse(response);
-                }
-                finally
-                {
-                    if (!string.IsNullOrWhiteSpace(path))
-                    {
-                        try { File.Delete(path); } catch { }
-                    }
-                }
-            }, TimeSpan.FromSeconds(settings.FastTestMode ? 8 : 12), cancellationToken).ConfigureAwait(false);
+            var socksPort = FindFreeLoopbackPort();
+            var config = _configBuilder.BuildAndroidProbe(profile, socksPort);
+            var response = await ProbeProcess.RunAsync(config, socksPort,
+                settings.FastTestMode ? 4 : 7, cancellationToken).ConfigureAwait(false);
+            return ParsePingResponse(response);
         }
         catch (System.OperationCanceledException) { throw; }
-        catch (TimeoutException ex)
-        {
-            throw new TunnelStartupException("موتور تست در زمان تعیین‌شده پاسخ نداد؛ تست متوقف شد و سرورها حفظ شدند. اگر تکرار شد، برنامه را ببند و دوباره باز کن.", ex);
-        }
+        catch (TunnelStartupException) { throw; }
         catch (Exception ex)
         {
             return new TestResult(false, null, $"libXray: {ex.Message}", ValidationLevel.None);
@@ -173,11 +135,7 @@ public sealed class AndroidTunnelService : ITunnelService
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        try { await LibXrayTestGate.WaitForIdleAsync(TimeSpan.FromSeconds(8), cancellationToken); }
-        catch (TimeoutException ex)
-        {
-            throw new TunnelStartupException("تست قبلی موتور هنوز پایان نیافته؛ برای اتصال برنامه را ببند و دوباره باز کن. سرورها ذخیره شده‌اند.", ex);
-        }
+        await ProbeProcess.StopAsync(cancellationToken).ConfigureAwait(false);
         await EnsureReadyAsync(settings, cancellationToken: cancellationToken);
         // A timeout/error may precede destruction of the previous service.
         if (AndroidVpnRuntime.IsServiceRunning)

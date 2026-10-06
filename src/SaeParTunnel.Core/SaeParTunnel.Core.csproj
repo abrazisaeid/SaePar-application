@@ -8,6 +8,7 @@
     <AssemblyName>SaeParTunnel.Core</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="9.0.14" />
     <EmbeddedResource Include="Data\Iran\catalog.json.gz" LogicalName="IranRoutingCatalog.json.gz" />
     <EmbeddedResource Include="Data\Iran\LICENSE-iran-hosted-domains.txt" LogicalName="IranRoutingCatalog.LICENSE.txt" />
   </ItemGroup>

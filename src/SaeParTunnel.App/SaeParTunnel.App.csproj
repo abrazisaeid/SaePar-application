@@ -11,14 +11,17 @@
     <LangVersion>latest</LangVersion>
     <ApplicationTitle>SaePar Tunnel</ApplicationTitle>
     <ApplicationId>com.saepar.tunnel</ApplicationId>
-    <ApplicationDisplayVersion>2.0.27</ApplicationDisplayVersion>
-    <ApplicationVersion>47</ApplicationVersion>
-    <Version>2.0.27</Version>
-    <PackageVersion>2.0.27</PackageVersion>
+    <ApplicationDisplayVersion>2.0.28</ApplicationDisplayVersion>
+    <ApplicationVersion>48</ApplicationVersion>
+    <Version>2.0.28</Version>
+    <PackageVersion>2.0.28</PackageVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
     <SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug' and '$(SaeParProbeDiagnostics)' == 'true'">
+    <DefineConstants>$(DefineConstants);SAEPAR_PROBE_DIAGNOSTICS</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
     <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
@@ -61,6 +64,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Maui.Controls" Version="9.0.120" />
     <PackageReference Include="QRCoder" Version="1.8.0" />
+    <PackageReference Include="SQLitePCLRaw.bundle_green" Version="2.1.11" />
     <ProjectReference Include="..\SaeParTunnel.Core\SaeParTunnel.Core.csproj" />
   </ItemGroup>
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">

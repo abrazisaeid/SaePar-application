@@ -11,6 +11,9 @@ public sealed class MauiJsonStore
     private readonly JsonCacheStore _settingsFiles = new();
     private string? _selectedServerId;
     private readonly string? _rootPath;
+    private SqliteProfileStore? _profiles;
+    private bool _archiveReadFailed;
+    private SqliteProfileStore ProfileDatabase => _profiles ??= new SqliteProfileStore(Path.Combine(RootPath, "profiles.db"));
     public MauiJsonStore() { }
     internal MauiJsonStore(string rootPath) { _rootPath = rootPath; }
     public string LastStorageError { get; private set; } = string.Empty;
@@ -100,11 +103,28 @@ public sealed class MauiJsonStore
         new HomeServerSnapshot { Profiles = SavedServerPolicy.ForHome(profiles, _selectedServerId).ToList() });
     public async Task<List<ConfigProfile>> LoadProfilesAsync()
     {
-        var profiles = await ReadAsync<List<ConfigProfile>>(ProfilesPath) ?? new();
+        try
+        {
+            var profiles = await LoadProfilesCoreAsync();
+            _archiveReadFailed = false;
+            return profiles;
+        }
+        catch
+        {
+            _archiveReadFailed = true;
+            LastStorageError = "خواندن آرشیو سرورها انجام نشد؛ داده‌های قبلی برای بازیابی حفظ شدند.";
+            throw;
+        }
+    }
+
+    private async Task<List<ConfigProfile>> LoadProfilesCoreAsync()
+    {
+        var stored = await ProfileDatabase.LoadAsync();
+        var profiles = stored ?? await ReadAsync<List<ConfigProfile>>(ProfilesPath) ?? new();
         var previous = new List<ConfigProfile>();
         try { previous = await LoadHomeServersAsync(); }
         catch (IOException) { /* A damaged optional cache cannot block the archive. */ }
-        if (!File.Exists(HomeServersPath) && profiles.Any(p => p.Health == ProfileHealth.Failed && !p.LastSuccessfulTest.HasValue) &&
+        if (stored is null && !File.Exists(HomeServersPath) && profiles.Any(p => p.Health == ProfileHealth.Failed && !p.LastSuccessfulTest.HasValue) &&
             File.Exists(ProfilesPath + ".bak"))
         {
             // Upgrade recovery only: recover success history for existing IDs,
@@ -112,7 +132,7 @@ public sealed class MauiJsonStore
             try { previous = await Task.Run(() => _files.ReadAsync<List<ConfigProfile>>(ProfilesPath + ".bak")) ?? new(); }
             catch (IOException) { /* An optional old backup must not block a valid primary. */ }
         }
-        return await Task.Run(() =>
+        var restored = await Task.Run(() =>
         {
             var history = previous.GroupBy(ConfigParser.ComputeId).ToDictionary(g => g.Key,
                 g => g.OrderByDescending(p => p.Health == ProfileHealth.Working)
@@ -130,16 +150,32 @@ public sealed class MauiJsonStore
             return profiles.OrderByDescending(p => p.Health == ProfileHealth.Working)
                 .ThenByDescending(p => p.LastSuccessfulTest).DistinctBy(p => p.Id).ToList();
         });
+        // Commit every migrated row and the migration marker together. Legacy
+        // JSON and its backups remain untouched for manual recovery.
+        if (stored is null) await ProfileDatabase.SaveSnapshotAsync(restored);
+        try { await SaveHomeServersAsync(restored); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return restored;
     }
     public async Task SaveProfilesAsync(IEnumerable<ConfigProfile> profiles)
     {
+        if (_archiveReadFailed) throw new IOException("آرشیو قبلی خوانده نشد؛ برای حفظ داده‌ها ذخیره متوقف شد.");
         var snapshot = profiles.ToList();
         foreach (var profile in snapshot)
             if (!profile.LastSuccessfulTest.HasValue) SavedServerPolicy.RememberSuccess(profile);
+        await ProfileDatabase.SaveSnapshotAsync(snapshot);
         try { await SaveHomeServersAsync(snapshot); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         { /* Optional fast-cache errors must not prevent authoritative archive saves. */ }
-        await WriteAsync(ProfilesPath, snapshot);
+    }
+
+    public async Task SaveProfileAsync(ConfigProfile profile, IEnumerable<ConfigProfile> allProfiles)
+    {
+        if (_archiveReadFailed) throw new IOException("آرشیو قبلی خوانده نشد؛ برای حفظ داده‌ها ذخیره متوقف شد.");
+        if (!profile.LastSuccessfulTest.HasValue) SavedServerPolicy.RememberSuccess(profile);
+        await ProfileDatabase.SaveProfileAsync(profile);
+        try { await SaveHomeServersAsync(allProfiles); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     private JsonCacheStore FilesFor(string path) => path == HomeServersPath ? _homeFiles

@@ -1,5 +1,47 @@
 # Android connection recovery (2.0.24)
 
+## Transactional archive and isolated probes (2.0.28)
+
+`profiles.db` now stores one complete profile per SQLite row. The first load
+validates and recovers legacy JSON/history before committing all rows and a schema
+marker in one transaction. Original JSON/tmp/backup files are preserved. Once
+migrated, the database is authoritative; stale JSON cannot resurrect cleaned rows.
+Unreadable databases/legacy archives block writes rather than replacing data with
+defaults. Settings and the five-server home snapshot remain small atomic JSON files.
+
+Successful probe checkpoints and standalone pings update only their profile row.
+Imports and cleanup reconcile a snapshot, writing changed rows and removing absent
+IDs atomically. Hashes detect unchanged rows without retaining a second full JSON
+archive in memory. Late individual probe results cannot recreate deleted profiles.
+
+Android probes use a private, non-exported bound Messenger service in `:probe`.
+Only a validated opaque configuration token crosses Binder. The client receives the
+worker PID before starting native work, serializes requests, and terminates only
+that private process on cancellation, deadline, or service failure. The next probe
+binds a fresh worker. VPN startup stops the probe worker; the main VPN core's JNI
+lock cannot be held by a hung test. Actual VPN success still requires internet
+validation. No failed local engine startup is counted as a dead server.
+
+The opt-in Debug build property `SaeParProbeDiagnostics=true` enables a device
+check (`saepar-probe-selftest` activity boolean extra). It uses invalid local Xray
+configuration, then a simulated hung worker, cancellation, and a second local
+native call. It never tests public proxies. All diagnostic entry points and hang
+simulation are absent from Release builds.
+
+Validation: 135 core/app-store tests, including changed-row counts, concurrent
+individual pings, transaction rollback/retry, corruption write protection, legacy
+file preservation, and no deleted-server resurrection after restart.
+
+Device validation on the connected phone: all 15,551 existing records migrated;
+four saved home servers and the selected ID were restored. The Debug-only local
+native check passed, a simulated hung probe cancelled in about 2.1 seconds, a fresh
+worker responded, and watchdog expiry followed by another worker restart passed.
+The main app remained alive and no probe process was left afterward. These checks
+do not establish end-to-end VPN connectivity on a mobile network.
+
+Implementation references: [SQLite native bundles](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/custom-versions)
+and [Android Messenger bound services](https://developer.android.com/develop/background-work/services/bound-services).
+
 ## Responsive home and fast restoration (2.0.27)
 
 The connected phone was running a debuggable 2.0.26 package with 17,444 archived

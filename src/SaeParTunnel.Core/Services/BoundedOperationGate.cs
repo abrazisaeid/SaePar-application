@@ -37,7 +37,18 @@ public sealed class BoundedOperationGate
     public async Task WaitForIdleAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
         await EnterAsync(timeout, cancellationToken).ConfigureAwait(false);
-        _gate.Release();
+        try
+        {
+            // The work's finally releases the semaphore a moment before its Task
+            // completes. Wait for that bookkeeping too, so the next caller does
+            // not reject an already-finished abandoned operation.
+            if (Volatile.Read(ref _abandonedOperation) is { } abandoned)
+            {
+                try { await abandoned.WaitAsync(timeout, cancellationToken).ConfigureAwait(false); }
+                catch when (abandoned.IsCompleted) { /* Late faults are already observed. */ }
+            }
+        }
+        finally { _gate.Release(); }
     }
 
     private async Task EnterAsync(TimeSpan timeout, CancellationToken cancellationToken)
