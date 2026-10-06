@@ -252,6 +252,20 @@ public sealed class ConfigParser
         return profile;
     }
 
+    public static void ValidateCachedProfile(ConfigProfile profile)
+    {
+        profile.Network = NormalizeNetwork(profile.Network);
+        profile.Security = profile.Security.Trim().ToLowerInvariant();
+        if (profile.Protocol == ProxyProtocol.Shadowsocks)
+        {
+            var uri = profile.OriginalUri.Split('#')[0];
+            var queryIndex = uri.IndexOf('?');
+            if (queryIndex >= 0 && uri[(queryIndex + 1)..].Contains("plugin=", StringComparison.OrdinalIgnoreCase))
+                MarkUnsupported(profile, "پلاگین Shadowsocks در این نسخه پشتیبانی نمی‌شود.");
+        }
+        ApplyCurrentXrayCompatibility(profile);
+    }
+
     private static void ApplyCurrentXrayCompatibility(ConfigProfile profile)
     {
         if (profile.Health == ProfileHealth.Unsupported)

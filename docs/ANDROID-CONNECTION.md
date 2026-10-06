@@ -1,5 +1,41 @@
 # Android connection recovery (2.0.24)
 
+## Responsive home and fast restoration (2.0.27)
+
+The connected phone was running a debuggable 2.0.26 package with 17,444 archived
+profiles (roughly 27 MB). Home displayed saved servers but a global busy flag
+also disabled their selection. Advanced/background scans could keep that flag
+set for a long time; their stop button was below the server rows.
+
+Server selection now has its own availability rule and stays enabled during
+background scans. Home shows progress/Stop before the rows. Connect can cancel
+an ongoing scan, await its completion (up to 20 seconds), restore the explicitly
+chosen server, and then connect; production/probe cores never deliberately overlap.
+The home spinner reports home work rather than every advanced operation.
+
+Atomic `home-servers.json` snapshots contain at most five saved profiles. Settings
+and this small snapshot use independent IO gates from the full archive, allowing
+home rows to appear/select while archive restoration continues. Import/search/
+connection waits until archive restoration finishes to avoid saving a partial list
+over the full archive. Startup shares one initialization task across page visits.
+The bundled Iran catalog summary is loaded separately. Cached compatibility checks
+inspect stored fields, without parsing and hashing every URI a second time. Legacy
+backup history is inspected on the initial upgrade; subsequent restores merge the
+small home history instead of deserializing another whole archive. Hidden advanced
+lists are not sorted in quick mode.
+
+Managed cancellation does not interrupt JNI. Native probes now have bounded waits
+(8 seconds fast, 12 normal), while the native operation retains its gate and temp
+file until it really returns. Late faults are observed. A timeout is reported as a
+local engine failure and stops testing rather than marking that server dead. A new
+VPN start waits for actual native idleness (up to 8 seconds). If native work itself
+never returns, the process still needs restarting; the UI no longer waits forever.
+
+Validation: 128 tests, including fast snapshot reads while the archive is locked,
+third-server recovery, cleanup reflected in snapshots, optional-cache error
+isolation, and cancelled/timed-out native simulations preserving serialization.
+These simulations do not establish VPN connectivity on a mobile network.
+
 ## Saved home servers and individual sharing (2.0.26)
 
 The home picker previously filtered exclusively on the latest `Working` status.

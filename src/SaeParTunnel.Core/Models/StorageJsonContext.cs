@@ -6,4 +6,5 @@ namespace SaeParTunnel.Core.Models;
     GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(AppSettings))]
 [JsonSerializable(typeof(List<ConfigProfile>))]
+[JsonSerializable(typeof(HomeServerSnapshot))]
 public partial class StorageJsonContext : JsonSerializerContext { }

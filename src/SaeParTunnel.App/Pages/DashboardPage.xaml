@@ -13,22 +13,19 @@
 
             <Border Style="{StaticResource Card}" Padding="16" StrokeShape="RoundRectangle 24">
                 <VerticalStackLayout Spacing="16">
-                    <Border WidthRequest="64" HeightRequest="64" StrokeThickness="0" StrokeShape="RoundRectangle 32"
-                            BackgroundColor="{StaticResource Surface2}" HorizontalOptions="Center">
-                        <Label Text="○" FontSize="36" HorizontalTextAlignment="Center" VerticalTextAlignment="Center"
-                               TextColor="{StaticResource TextSecondary}">
-                            <Label.Triggers>
-                                <DataTrigger TargetType="Label" Binding="{Binding IsConnected}" Value="True">
-                                    <Setter Property="Text" Value="✓" />
-                                    <Setter Property="TextColor" Value="{StaticResource Success}" />
-                                </DataTrigger>
-                            </Label.Triggers>
-                        </Label>
-                    </Border>
                     <Label Text="{Binding HomeConnectionTitle}" FontSize="22" FontAttributes="Bold" HorizontalTextAlignment="Center"
                            SemanticProperties.HeadingLevel="Level1" />
                     <Label Text="{Binding HomeHint}" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="Center" LineBreakMode="WordWrap" />
-                    <ActivityIndicator IsRunning="{Binding IsBusy}" IsVisible="{Binding IsBusy}" Color="{StaticResource Accent}" HeightRequest="24" />
+                    <ActivityIndicator IsRunning="{Binding IsHomeBusy}" IsVisible="{Binding IsHomeBusy}" Color="{StaticResource Accent}" HeightRequest="24" />
+                    <VerticalStackLayout Spacing="8" IsVisible="{Binding IsTesting}">
+                        <ProgressBar Progress="{Binding ProgressFraction}" ProgressColor="{StaticResource Accent}" />
+                        <Label Text="{Binding HomeSearchProgress}" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="Center" />
+                    </VerticalStackLayout>
+                    <Button Text="توقف تست" Command="{Binding CancelTestCommand}" IsVisible="{Binding CanCancelHomeSearch}" BackgroundColor="Transparent" />
+                    <Button Text="{Binding HomeConnectText}" Command="{Binding ConnectCommand}" IsVisible="{Binding ShowHomeConnectAction}"
+                            IsEnabled="{Binding CanConnectHome}" HeightRequest="56" CornerRadius="16" Style="{StaticResource PrimaryButton}" />
+                    <Button Text="قطع اتصال" Command="{Binding DisconnectCommand}" IsVisible="{Binding ShowDisconnectAction}"
+                            IsEnabled="{Binding CanStopConnection}" HeightRequest="56" CornerRadius="16" Style="{StaticResource DangerButton}" />
 
                     <VerticalStackLayout Spacing="8" IsVisible="{Binding HasHomeServers}">
                         <Label Text="سرورهای ذخیره‌شده" FontAttributes="Bold" />
@@ -46,7 +43,7 @@
                                         </Border.Triggers>
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                                             <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="24,*" RowSpacing="3"
-                                                  IsEnabled="{Binding BindingContext.CanSearchServers, Source={x:Reference DashboardRoot}, x:DataType={x:Null}}">
+                                                  IsEnabled="{Binding BindingContext.CanSelectHomeServer, Source={x:Reference DashboardRoot}, x:DataType={x:Null}}">
                                                 <Grid.GestureRecognizers>
                                                     <TapGestureRecognizer Command="{Binding BindingContext.SelectHomeServerCommand, Source={x:Reference DashboardRoot}, x:DataType={x:Null}}"
                                                                           CommandParameter="{Binding Profile}" />
@@ -79,10 +76,6 @@
                         <Label Text="{Binding PingFeedback}" IsVisible="{Binding HasPingFeedback}" Style="{StaticResource SubtleLabel}" />
                     </VerticalStackLayout>
 
-                    <Button Text="اتصال" Command="{Binding ConnectCommand}" IsVisible="{Binding ShowHomeConnectAction}"
-                            IsEnabled="{Binding CanConnectHome}" HeightRequest="56" CornerRadius="16" Style="{StaticResource PrimaryButton}" />
-                    <Button Text="قطع اتصال" Command="{Binding DisconnectCommand}" IsVisible="{Binding ShowDisconnectAction}"
-                            IsEnabled="{Binding CanStopConnection}" HeightRequest="56" CornerRadius="16" Style="{StaticResource DangerButton}" />
                 </VerticalStackLayout>
             </Border>
 
@@ -97,11 +90,6 @@
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
-                <VerticalStackLayout Spacing="8" IsVisible="{Binding IsTesting}">
-                    <ProgressBar Progress="{Binding ProgressFraction}" ProgressColor="{StaticResource Accent}" />
-                    <Label Text="{Binding HomeSearchProgress}" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="Center" />
-                </VerticalStackLayout>
-                <Button Text="توقف جست‌وجو" Command="{Binding CancelTestCommand}" IsVisible="{Binding CanCancelHomeSearch}" BackgroundColor="Transparent" />
                 <Label Text="۵ سرور سالم پیدا می‌کنیم؛ بهترین گزینه انتخاب می‌شود."
                        IsVisible="{Binding IsDisconnected}" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="Center" />
             </VerticalStackLayout>

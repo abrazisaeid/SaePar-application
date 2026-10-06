@@ -7,6 +7,9 @@ namespace SaeParTunnel.App.Services;
 public sealed class MauiJsonStore
 {
     private readonly JsonCacheStore _files = new();
+    private readonly JsonCacheStore _homeFiles = new();
+    private readonly JsonCacheStore _settingsFiles = new();
+    private string? _selectedServerId;
     private readonly string? _rootPath;
     public MauiJsonStore() { }
     internal MauiJsonStore(string rootPath) { _rootPath = rootPath; }
@@ -29,6 +32,7 @@ public sealed class MauiJsonStore
     public string RuntimePath => Path.Combine(RootPath, "Runtime");
     private string SettingsPath => Path.Combine(RootPath, "settings.json");
     private string ProfilesPath => Path.Combine(RootPath, "profiles.json");
+    private string HomeServersPath => Path.Combine(RootPath, "home-servers.json");
 
     public void EnsureCreated()
     {
@@ -40,6 +44,7 @@ public sealed class MauiJsonStore
     {
         EnsureCreated();
         var settings = await ReadAsync<AppSettings>(SettingsPath) ?? new AppSettings();
+        _selectedServerId = settings.SelectedServerId;
         var refreshValidators = settings.DataSchemaVersion < 27;
         var shouldSave = settings.DataSchemaVersion < new AppSettings().DataSchemaVersion;
         // Preserve an explicitly selected legacy whitelist mode on upgrades.
@@ -72,12 +77,34 @@ public sealed class MauiJsonStore
         return settings;
     }
 
-    public Task SaveSettingsAsync(AppSettings settings) => WriteAsync(SettingsPath, settings);
+    public Task SaveSettingsAsync(AppSettings settings)
+    {
+        _selectedServerId = settings.SelectedServerId;
+        return WriteAsync(SettingsPath, settings);
+    }
+
+    public async Task<List<ConfigProfile>> LoadHomeServersAsync()
+    {
+        var snapshot = await ReadAsync<HomeServerSnapshot>(HomeServersPath);
+        var profiles = snapshot?.Profiles ?? new();
+        foreach (var profile in profiles)
+        {
+            ConfigParser.ValidateCachedProfile(profile);
+            if (profile.Health == ProfileHealth.Testing) profile.Health = ProfileHealth.Untested;
+            if (!profile.LastSuccessfulTest.HasValue) SavedServerPolicy.RememberSuccess(profile);
+        }
+        return SavedServerPolicy.ForHome(profiles, _selectedServerId).ToList();
+    }
+
+    public Task SaveHomeServersAsync(IEnumerable<ConfigProfile> profiles) => WriteAsync(HomeServersPath,
+        new HomeServerSnapshot { Profiles = SavedServerPolicy.ForHome(profiles, _selectedServerId).ToList() });
     public async Task<List<ConfigProfile>> LoadProfilesAsync()
     {
         var profiles = await ReadAsync<List<ConfigProfile>>(ProfilesPath) ?? new();
         var previous = new List<ConfigProfile>();
-        if (profiles.Any(p => p.Health == ProfileHealth.Failed && !p.LastSuccessfulTest.HasValue) &&
+        try { previous = await LoadHomeServersAsync(); }
+        catch (IOException) { /* A damaged optional cache cannot block the archive. */ }
+        if (!File.Exists(HomeServersPath) && profiles.Any(p => p.Health == ProfileHealth.Failed && !p.LastSuccessfulTest.HasValue) &&
             File.Exists(ProfilesPath + ".bak"))
         {
             // Upgrade recovery only: recover success history for existing IDs,
@@ -87,22 +114,15 @@ public sealed class MauiJsonStore
         }
         return await Task.Run(() =>
         {
-            var parser = new ConfigParser();
             var history = previous.GroupBy(ConfigParser.ComputeId).ToDictionary(g => g.Key,
                 g => g.OrderByDescending(p => p.Health == ProfileHealth.Working)
                     .ThenByDescending(p => p.LastSuccessfulTest ?? p.LastTested).First());
             foreach (var profile in profiles)
             {
-                profile.Id = ConfigParser.ComputeId(profile);
                 if (!profile.LastSuccessfulTest.HasValue) SavedServerPolicy.RememberSuccess(profile);
-                // Older caches predate the engine's removed-feature checks.
-                var parsed = string.IsNullOrWhiteSpace(profile.OriginalUri)
-                    ? null : parser.Parse(profile.OriginalUri, profile.Source, out _);
-                if (parsed?.Health == ProfileHealth.Unsupported)
-                {
-                    profile.Health = ProfileHealth.Unsupported;
-                    profile.TestMessage = parsed.TestMessage;
-                }
+                // Check stored fields without reparsing and rehashing every URI.
+                ConfigParser.ValidateCachedProfile(profile);
+                profile.Id = ConfigParser.ComputeId(profile);
                 if (profile.Health == ProfileHealth.Testing)
                     profile.Health = ProfileHealth.Untested;
                 if (history.TryGetValue(profile.Id, out var prior)) SavedServerPolicy.RecoverHistory(profile, prior);
@@ -111,13 +131,25 @@ public sealed class MauiJsonStore
                 .ThenByDescending(p => p.LastSuccessfulTest).DistinctBy(p => p.Id).ToList();
         });
     }
-    public Task SaveProfilesAsync(IEnumerable<ConfigProfile> profiles) => WriteAsync(ProfilesPath, profiles.ToList());
+    public async Task SaveProfilesAsync(IEnumerable<ConfigProfile> profiles)
+    {
+        var snapshot = profiles.ToList();
+        foreach (var profile in snapshot)
+            if (!profile.LastSuccessfulTest.HasValue) SavedServerPolicy.RememberSuccess(profile);
+        try { await SaveHomeServersAsync(snapshot); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { /* Optional fast-cache errors must not prevent authoritative archive saves. */ }
+        await WriteAsync(ProfilesPath, snapshot);
+    }
+
+    private JsonCacheStore FilesFor(string path) => path == HomeServersPath ? _homeFiles
+        : path == SettingsPath ? _settingsFiles : _files;
 
     private async Task<T?> ReadAsync<T>(string path)
     {
         try
         {
-            return await Task.Run(() => _files.ReadAsync<T>(path)).ConfigureAwait(false);
+            return await Task.Run(() => FilesFor(path).ReadAsync<T>(path)).ConfigureAwait(false);
         }
         catch
         {
@@ -130,7 +162,7 @@ public sealed class MauiJsonStore
     {
         try
         {
-            await Task.Run(() => _files.WriteAsync(path, value)).ConfigureAwait(false);
+            await Task.Run(() => FilesFor(path).WriteAsync(path, value)).ConfigureAwait(false);
         }
         catch
         {

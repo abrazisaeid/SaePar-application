@@ -43,6 +43,13 @@ public sealed class MainViewModel : ObservableObject
     private ConfigProfile? _selectedHealthyProfile;
     private bool _isBusy;
     private bool _initialized;
+    private Task? _initializationTask;
+    private bool _isInitializing;
+    private bool _isLoadingHome;
+    private bool _saveInitialSelection;
+    private bool _waitingForTests;
+    private TaskCompletionSource? _testCompletion;
+    private TaskCompletionSource? _discoveryCompletion;
     private bool _isTesting;
     private bool _findingServers;
     private bool _homeSearchCompleted;
@@ -93,7 +100,7 @@ public sealed class MainViewModel : ObservableObject
         FindServersCommand = new Command(async () => await RunSafeAsync(FindServersAsync));
         SelectHomeServerCommand = new Command<ConfigProfile>(profile =>
         {
-            if (CanSearchServers && profile is not null) SelectedHealthyProfile = profile;
+            if (CanSelectHomeServer && profile is not null) SelectedHealthyProfile = profile;
         });
         PingSelectedServerCommand = new Command(async () => await RunSafeAsync(PingSelectedServerAsync));
         CleanupOldServersCommand = new Command(async () => await RunSafeAsync(CleanupOldServersAsync));
@@ -120,7 +127,7 @@ public sealed class MainViewModel : ObservableObject
         ClearSelectionCommand = new Command(ClearTestSelection);
         TestHealthySelectionCommand = new Command(async () => await RunSafeAsync(TestHealthySelectionAsync));
         CancelTestCommand = new Command(CancelTest);
-        ConnectCommand = new Command(async () => await RunSafeAsync(ConnectSelectedAsync), () => CanStartConnection);
+        ConnectCommand = new Command(async () => await ConnectFromHomeAsync(), () => CanConnectHome);
         ConnectBestCommand = new Command(async () => await RunSafeAsync(ConnectBestAsync), () => CanStartConnection);
         DisconnectCommand = new Command(async () => await RunSafeAsync(DisconnectAsync), () => CanStopConnection);
         SaveSettingsCommand = new Command(async () => await RunSafeAsync(SaveSettingsAsync));
@@ -233,6 +240,7 @@ public sealed class MainViewModel : ObservableObject
             {
                 Settings.SelectedServerId = value.Id;
                 if (_initialized) _ = PersistHomeSelectionAsync();
+                else if (_isInitializing) _saveInitialSelection = true;
             }
             OnPropertyChanged(nameof(SelectedHealthyPingText));
             OnPropertyChanged(nameof(HealthySelectionSummary));
@@ -283,21 +291,27 @@ public sealed class MainViewModel : ObservableObject
     public Command PingSelectedServerCommand { get; }
     public Command CleanupOldServersCommand { get; }
     public string CleanupSummary { get => _cleanupSummary; private set => SetProperty(ref _cleanupSummary, value); }
-    public bool CanPingSelectedServer => SelectedHealthyProfile is not null && IsNotBusy && !_findingServers && !IsConnectionBusy &&
+    public bool CanPingSelectedServer => !_isInitializing && SelectedHealthyProfile is not null && IsNotBusy && !_findingServers && !IsConnectionBusy &&
         (!IsConnected || SelectedHealthyProfile.Id == _activeProfileId);
     public string PingButtonText => _isPinging ? "در حال اندازه‌گیری…" : "گرفتن پینگ";
     public string PingFeedback => _pingFeedback;
     public bool HasPingFeedback => _pingFeedback.Length > 0;
     public bool HasHomeServers => HomeServers.Count > 0;
+    public bool CanSelectHomeServer => HasHomeServers && !IsConnected && !IsConnectionBusy && !_waitingForTests;
+    public bool IsHomeBusy => _isLoadingHome || IsConnectionBusy || _isPinging || _findingServers || _waitingForTests;
+    public string HomeConnectText => IsTesting || _findingServers ? "توقف تست و اتصال" : "اتصال";
     public bool ShowHomeConnectAction => !IsConnected && (HasHomeServers || IsConnectionBusy);
     public bool CanCancelHomeSearch => _findingServers || IsTesting;
     public bool CanSearchServers => CanStartConnection && !_findingServers;
-    public bool CanConnectHome => CanStartConnection && !_findingServers && SelectedHealthyProfile is not null && CanTunnel;
+    public bool CanConnectHome => !_isInitializing && !_waitingForTests && !IsConnected && !IsConnectionBusy &&
+        (IsNotBusy || IsTesting || _findingServers) && SelectedHealthyProfile is not null && CanTunnel;
     public string SearchServersLabel => HasHomeServers ? "جست‌وجوی دوبارهٔ سرورها" : "پیدا کردن سرور";
     public string HomeConnectionTitle => IsConnectionBusy ? ConnectionBadgeText : IsConnected ? "متصل هستی" : "آمادهٔ اتصال";
     public string HomeSearchProgress => $"{ProgressDone:N0} بررسی شد · {ProgressFullWorking:N0} سرور سالم";
     public string HomeHint => !CanTunnel ? "اتصال روی این دستگاه پشتیبانی نمی‌شود."
         : _isPinging ? "در حال گرفتن پینگ همین سرور…"
+        : _waitingForTests ? "در حال پایان‌دادن به تست برای اتصال…"
+        : _isLoadingHome ? "در حال بازیابی سرورهای ذخیره‌شده…"
         : _findingServers ? (IsTesting ? "در حال بررسی سرورها؛ کمی صبر کن." : "در حال دریافت سرورها…")
         : IsConnectionBusy ? "چند لحظه صبر کن…"
         : IsConnected ? "برای پایان، قطع اتصال را بزن."
@@ -312,6 +326,34 @@ public sealed class MainViewModel : ObservableObject
             nameof(SearchServersLabel), nameof(HomeConnectionTitle), nameof(HomeHint), nameof(HomeSearchProgress), nameof(CanCancelHomeSearch), nameof(ShowHomeConnectAction),
             nameof(CanPingSelectedServer), nameof(PingButtonText), nameof(PingFeedback), nameof(HasPingFeedback) })
             OnPropertyChanged(name);
+        OnPropertyChanged(nameof(CanSelectHomeServer));
+        OnPropertyChanged(nameof(IsHomeBusy));
+        OnPropertyChanged(nameof(HomeConnectText));
+        ConnectCommand?.ChangeCanExecute();
+    }
+
+    private async Task ConnectFromHomeAsync()
+    {
+        if (!CanConnectHome || SelectedHealthyProfile is not { } selected) return;
+        if (IsTesting || _findingServers)
+        {
+            var completion = _findingServers ? _discoveryCompletion?.Task : _testCompletion?.Task;
+            _waitingForTests = true;
+            NotifyHomeChanged();
+            CancelTest();
+            try
+            {
+                if (completion is not null) await completion.WaitAsync(TimeSpan.FromSeconds(20));
+            }
+            catch (TimeoutException)
+            {
+                _homeNotice = "تست هنوز پایان نیافته؛ سرورها حفظ شده‌اند. چند لحظه بعد دوباره اتصال را بزن.";
+                return;
+            }
+            finally { _waitingForTests = false; NotifyHomeChanged(); }
+            SelectedHealthyProfile = Profiles.FirstOrDefault(p => p.Id == selected.Id) ?? SelectedHealthyProfile;
+        }
+        await RunSafeAsync(ConnectSelectedAsync);
     }
 
     private async Task PingSelectedServerAsync()
@@ -367,7 +409,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (IsConnected && string.IsNullOrEmpty(_activeProfileId)) return 0;
         var removable = ProfileCleanupPolicy.FindRemovable(Profiles, DateTime.Now,
-            IsConnected ? _activeProfileId : null);
+            IsConnected ? _activeProfileId : _waitingForTests ? SelectedHealthyProfile?.Id : null);
         if (removable.Count == 0) return 0;
         var ids = removable.Select(p => p.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var now = DateTime.UtcNow;
@@ -416,6 +458,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (!CanSearchServers) return;
         _findingServers = true;
+        _discoveryCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _homeNotice = "";
         using var discovery = new CancellationTokenSource();
         discovery.CancelAfter(TimeSpan.FromMinutes(2));
@@ -449,6 +492,7 @@ public sealed class MainViewModel : ObservableObject
         {
             _discoveryCts = null;
             _findingServers = false;
+            _discoveryCompletion?.TrySetResult();
             NotifyHomeChanged();
         }
     }
@@ -457,8 +501,8 @@ public sealed class MainViewModel : ObservableObject
     public bool ShowConnectAction => !IsConnected;
     public bool ShowDisconnectAction => IsConnected;
     public bool ShowConnectionTools => !IsConnected && !IsConnectionBusy;
-    public bool CanStartConnection => IsNotBusy && !IsConnected && !IsConnectionBusy;
-    public bool CanStopConnection => IsNotBusy && IsConnected && !IsConnectionBusy;
+    public bool CanStartConnection => !_isInitializing && IsNotBusy && !IsConnected && !IsConnectionBusy;
+    public bool CanStopConnection => !_isInitializing && IsNotBusy && IsConnected && !IsConnectionBusy;
     public string ConnectionBadgeText => _connectionUiPhase switch
         {
             ConnectionUiPhase.Connecting => "در حال اتصال",
@@ -692,26 +736,50 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(RecommendedProfileDetails));
     }
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync()
     {
-        if (_initialized || IsBusy) return;
-        IsBusy = true;
+        if (_initialized) return Task.CompletedTask;
+        if (_initializationTask is { IsCompleted: false }) return _initializationTask;
+        if (IsBusy) return Task.CompletedTask;
+        return _initializationTask = InitializeCoreAsync();
+    }
+
+    private async Task InitializeCoreAsync()
+    {
+        _isInitializing = true;
+        _isLoadingHome = true;
+        RefreshConnectionActions();
         var initialized = false;
         var loadErrors = new List<string>();
         StatusMessage = "در حال بارگذاری تنظیمات و کانفیگ‌ها...";
         try
         {
             _store.EnsureCreated();
+            try { Settings = await _store.LoadSettingsAsync(); }
+            catch { loadErrors.Add(_store.LastStorageError); }
+            // Publish a tiny home snapshot before reading the full server archive.
+            try
+            {
+                var home = await _store.LoadHomeServersAsync();
+                if (home.Count > 0)
+                {
+                    Profiles.ReplaceRange(home);
+                    IsConnected = _tunnel.IsConnected;
+                    RefreshStats();
+                    _isLoadingHome = false;
+                    NotifyHomeChanged();
+                }
+            }
+            catch { /* Optional cache errors do not block the full archive. */ }
             // Restore the server list even when the independent settings file is damaged.
             try
             {
                 Profiles.ReplaceRange(await _store.LoadProfilesAsync());
             }
             catch { loadErrors.Add(_store.LastStorageError); }
-            try { Settings = await _store.LoadSettingsAsync(); }
-            catch { loadErrors.Add(_store.LastStorageError); }
-            await Task.Run(() => _ = IranRoutingCatalog.Default);
-            _iranRoutingSummary = $"{IranRoutingCatalog.Default.DirectDomains.Length:N0} دامنه و {IranRoutingCatalog.Default.IpRanges.Length:N0} محدودهٔ IP در فهرست پیش‌فرض";
+            RefreshStats();
+            _isLoadingHome = false;
+            NotifyHomeChanged();
             DirectRoutingEntries.ReplaceRange(Settings.DirectRoutingEntries);
             RefreshRoutingList();
             OnPropertyChanged(nameof(IranBypassEnabled));
@@ -785,6 +853,17 @@ public sealed class MainViewModel : ObservableObject
                 ConnectionStatusMessage = "آماده برای اتصال؛ iOS در اولین اتصال مجوز افزودن VPN را نمایش می‌دهد.";
             RefreshDiagnosticsReport();
             initialized = loadErrors.Count == 0;
+            if (initialized)
+            {
+                if (_saveInitialSelection)
+                {
+                    await _store.SaveSettingsAsync(Settings);
+                    _saveInitialSelection = false;
+                }
+                try { await _store.SaveHomeServersAsync(Profiles); }
+                catch { /* The full archive remains authoritative if fast caching fails. */ }
+            }
+            _ = LoadIranRoutingSummaryAsync();
         }
         catch (Exception)
         {
@@ -797,14 +876,27 @@ public sealed class MainViewModel : ObservableObject
         finally
         {
             _initialized = initialized;
+            _isInitializing = false;
+            _isLoadingHome = false;
             if (loadErrors.Count > 0)
             {
                 _homeNotice = string.Join("\n", loadErrors);
                 ConnectionStatusMessage = _homeNotice;
                 NotifyHomeChanged();
             }
-            IsBusy = false;
+            RefreshConnectionActions();
         }
+    }
+
+    private async Task LoadIranRoutingSummaryAsync()
+    {
+        try
+        {
+            var summary = await Task.Run(() => $"{IranRoutingCatalog.Default.DirectDomains.Length:N0} دامنه و {IranRoutingCatalog.Default.IpRanges.Length:N0} محدودهٔ IP در فهرست پیش‌فرض");
+            _iranRoutingSummary = summary;
+            OnPropertyChanged(nameof(IranRoutingSummary));
+        }
+        catch { /* Routing construction reports a missing catalog when actually needed. */ }
     }
 
     private Task GetConfigAsync() => GetConfigAsync(CancellationToken.None);
@@ -1448,6 +1540,8 @@ public sealed class MainViewModel : ObservableObject
         }
 #endif
         _testCts?.Cancel(); _testCts?.Dispose();
+        var testCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _testCompletion = testCompletion;
         _testCts = CancellationTokenSource.CreateLinkedTokenSource(simpleSearch ? _discoveryCts?.Token ?? CancellationToken.None : CancellationToken.None);
         var ct = _testCts.Token;
         IsBusy = true; IsTesting = true; ProgressTotal = candidates.Count; ProgressDone = 0; ProgressWorking = 0; ProgressFailed = 0; ProgressFullWorking = 0;
@@ -1588,7 +1682,8 @@ public sealed class MainViewModel : ObservableObject
         finally
         {
             MaybeUpdateProgress(sw, tested, true);
-            await PersistFinishedTestRunAsync();
+            try { await PersistFinishedTestRunAsync(); }
+            finally { testCompletion.TrySetResult(); }
             RefreshFilters(); RefreshStats();
             IsTesting = false; IsBusy = false;
             StatusMessage = ct.IsCancellationRequested
@@ -1686,6 +1781,8 @@ public sealed class MainViewModel : ObservableObject
         }
 #endif
         _testCts?.Cancel(); _testCts?.Dispose(); _testCts = new CancellationTokenSource(); var ct = _testCts.Token;
+        var testCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _testCompletion = testCompletion;
         IsBusy = true; IsTesting = true; ProgressTotal = candidates.Count; ProgressDone = 0; ProgressWorking = 0; ProgressFailed = 0; ProgressFullWorking = 0;
         _healthySearchTarget = null;
         var sw = Stopwatch.StartNew();
@@ -1733,6 +1830,12 @@ public sealed class MainViewModel : ObservableObject
                     await MainThread.InvokeOnMainThreadAsync(() => p.Health = old);
                     return;
                 }
+                catch
+                {
+                    await MainThread.InvokeOnMainThreadAsync(() => p.Health = old);
+                    _testCts?.Cancel();
+                    throw;
+                }
             }
         }
 
@@ -1744,7 +1847,8 @@ public sealed class MainViewModel : ObservableObject
         finally
         {
             MaybeUpdateProgress(sw, tested, true);
-            await PersistFinishedTestRunAsync();
+            try { await PersistFinishedTestRunAsync(); }
+            finally { testCompletion.TrySetResult(); }
             RefreshFilters(); RefreshStats();
             IsTesting = false; IsBusy = false;
             StatusMessage = ct.IsCancellationRequested
@@ -2333,7 +2437,7 @@ public sealed class MainViewModel : ObservableObject
             _ => query
         };
 
-        query = SortOption switch
+        if (ShowAdvancedConfigTools) query = SortOption switch
         {
             "بهترین امتیاز" => query.OrderByDescending(x => x.QualityScore).ThenBy(x => x.LatencyMs ?? int.MaxValue).ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase),
             "قدیمی‌ترین اضافه‌شده" => query.OrderBy(x => x.FirstSeen).ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase),
@@ -2453,7 +2557,7 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task RunSafeAsync(Func<Task> action)
     {
-        if (IsBusy) return;
+        if (IsBusy || _isInitializing) return;
         try { await action(); }
         catch (OperationCanceledException)
         {
