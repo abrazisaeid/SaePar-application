@@ -91,6 +91,10 @@ public sealed class MainViewModel : ObservableObject
 
         GetConfigCommand = new Command(async () => await RunSafeAsync(GetConfigAsync));
         FindServersCommand = new Command(async () => await RunSafeAsync(FindServersAsync));
+        SelectHomeServerCommand = new Command<ConfigProfile>(profile =>
+        {
+            if (CanSearchServers && profile is not null) SelectedHealthyProfile = profile;
+        });
         PingSelectedServerCommand = new Command(async () => await RunSafeAsync(PingSelectedServerAsync));
         CleanupOldServersCommand = new Command(async () => await RunSafeAsync(CleanupOldServersAsync));
         FetchSubscriptionCommand = new Command<SubscriptionSourceViewModel>(async source =>
@@ -159,6 +163,8 @@ public sealed class MainViewModel : ObservableObject
     public ObservableRangeCollection<ConfigProfile> Profiles { get; } = new();
     public ObservableRangeCollection<ConfigProfile> FilteredProfiles { get; } = new();
     public ObservableRangeCollection<ConfigProfile> HealthyProfiles { get; } = new();
+    public ObservableRangeCollection<HomeServerViewModel> HomeServers { get; } = new();
+    public Command<ConfigProfile> SelectHomeServerCommand { get; }
     public ObservableRangeCollection<SubscriptionSourceViewModel> SubscriptionSources { get; } = new();
     public ObservableRangeCollection<string> WhitelistWebsites { get; } = new();
     public ObservableRangeCollection<string> DirectRoutingEntries { get; } = new();
@@ -208,14 +214,8 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!SetProperty(ref _selectedProfile, value)) return;
             OnPropertyChanged(nameof(SelectedProfileSummary));
-            if (!IsConnected && value?.Health == ProfileHealth.Working && !ReferenceEquals(_selectedHealthyProfile, value))
-            {
-                _selectedHealthyProfile = value;
-                OnPropertyChanged(nameof(SelectedHealthyProfile));
-                OnPropertyChanged(nameof(SelectedHealthyPingText));
-                OnPropertyChanged(nameof(HealthySelectionSummary));
-                OnPropertyChanged(nameof(HasSelectedHealthyProfile));
-            }
+            if (!IsConnected && value is not null && SavedServerPolicy.IsSaved(value) && !ReferenceEquals(_selectedHealthyProfile, value))
+                SelectedHealthyProfile = value;
         }
     }
     public ConfigProfile? SelectedHealthyProfile
@@ -228,6 +228,12 @@ public sealed class MainViewModel : ObservableObject
             _homeNotice = "";
             _pingFeedback = "";
             if (value is not null) SelectedProfile = value;
+            foreach (var row in HomeServers) row.RefreshSelection(row.Profile.Id == value?.Id);
+            if (value is not null && Settings.SelectedServerId != value.Id)
+            {
+                Settings.SelectedServerId = value.Id;
+                if (_initialized) _ = PersistHomeSelectionAsync();
+            }
             OnPropertyChanged(nameof(SelectedHealthyPingText));
             OnPropertyChanged(nameof(HealthySelectionSummary));
             OnPropertyChanged(nameof(HasSelectedHealthyProfile));
@@ -235,8 +241,14 @@ public sealed class MainViewModel : ObservableObject
         }
     }
     public bool HasSelectedHealthyProfile => SelectedHealthyProfile is not null;
+    private async Task PersistHomeSelectionAsync()
+    {
+        try { await _store.SaveSettingsAsync(Settings); }
+        catch { _homeNotice = _store.LastStorageError; NotifyHomeChanged(); }
+    }
     public string SelectedProfileSummary => SelectedProfile is null ? "کانفیگی انتخاب نشده" : $"{SelectedProfile.ProtocolText} • {SelectedProfile.Endpoint} • {SelectedProfile.HealthText} • {SelectedProfile.LatencyText}";
-    public string SelectedHealthyPingText => SelectedHealthyProfile?.LatencyMs is int ms ? $"{ms} ms" : "-";
+    public string SelectedHealthyPingText => SelectedHealthyProfile?.LatencyMs is int ms ? $"{ms} ms"
+        : SelectedHealthyProfile?.LastSuccessfulLatencyMs is int previous ? $"قبلی: {previous} ms" : "—";
     public string HealthySelectionSummary => SelectedHealthyProfile is null
         ? "هنوز سرور سالمی انتخاب نشده است."
         : $"{SelectedHealthyProfile.ProtocolText} • {SelectedHealthyProfile.Endpoint} • آخرین Ping: {SelectedHealthyProfile.LatencyText}";
@@ -276,7 +288,7 @@ public sealed class MainViewModel : ObservableObject
     public string PingButtonText => _isPinging ? "در حال اندازه‌گیری…" : "گرفتن پینگ";
     public string PingFeedback => _pingFeedback;
     public bool HasPingFeedback => _pingFeedback.Length > 0;
-    public bool HasHomeServers => HealthyProfiles.Count > 0;
+    public bool HasHomeServers => HomeServers.Count > 0;
     public bool ShowHomeConnectAction => !IsConnected && (HasHomeServers || IsConnectionBusy);
     public bool CanCancelHomeSearch => _findingServers || IsTesting;
     public bool CanSearchServers => CanStartConnection && !_findingServers;
@@ -290,7 +302,7 @@ public sealed class MainViewModel : ObservableObject
         : IsConnectionBusy ? "چند لحظه صبر کن…"
         : IsConnected ? "برای پایان، قطع اتصال را بزن."
         : _homeNotice.Length > 0 ? _homeNotice
-        : HasHomeServers ? "سرور آماده است. اتصال را بزن."
+        : HasHomeServers ? "سرور را انتخاب کن و اتصال را بزن."
         : _homeSearchCompleted ? "سرور سالمی پیدا نشد. اینترنت را بررسی کن و دوباره جست‌وجو کن."
         : "برای شروع، پیدا کردن سرور را بزن.";
 
@@ -322,6 +334,7 @@ public sealed class MainViewModel : ObservableObject
             {
                 profile.FailureCount = 0;
                 profile.Health = result.Level == ValidationLevel.FullProxy ? ProfileHealth.Working : ProfileHealth.Reachable;
+                SavedServerPolicy.RememberSuccess(profile);
             }
             else if (!IsConnected)
             {
@@ -333,6 +346,8 @@ public sealed class MainViewModel : ObservableObject
                 : "پاسخی دریافت نشد؛ می‌توانی دوباره امتحان کنی.";
             await ApplyAutomaticCleanupAsync();
             await _store.SaveProfilesAsync(Profiles);
+            RefreshFilters();
+            RefreshStats();
         }
         catch (OperationCanceledException)
         {
@@ -681,11 +696,20 @@ public sealed class MainViewModel : ObservableObject
     {
         if (_initialized || IsBusy) return;
         IsBusy = true;
+        var initialized = false;
+        var loadErrors = new List<string>();
         StatusMessage = "در حال بارگذاری تنظیمات و کانفیگ‌ها...";
         try
         {
             _store.EnsureCreated();
-            Settings = await _store.LoadSettingsAsync();
+            // Restore the server list even when the independent settings file is damaged.
+            try
+            {
+                Profiles.ReplaceRange(await _store.LoadProfilesAsync());
+            }
+            catch { loadErrors.Add(_store.LastStorageError); }
+            try { Settings = await _store.LoadSettingsAsync(); }
+            catch { loadErrors.Add(_store.LastStorageError); }
             await Task.Run(() => _ = IranRoutingCatalog.Default);
             _iranRoutingSummary = $"{IranRoutingCatalog.Default.DirectDomains.Length:N0} دامنه و {IranRoutingCatalog.Default.IpRanges.Length:N0} محدودهٔ IP در فهرست پیش‌فرض";
             DirectRoutingEntries.ReplaceRange(Settings.DirectRoutingEntries);
@@ -709,8 +733,6 @@ public sealed class MainViewModel : ObservableObject
             RefreshCommunityHealthStatusMessage();
 
             _visibleLimit = InitialVisibleLimit();
-            var loadedProfiles = await _store.LoadProfilesAsync();
-            Profiles.ReplaceRange(loadedProfiles);
             WhitelistWebsites.ReplaceRange(Settings.WhitelistWebsites.Distinct(StringComparer.OrdinalIgnoreCase));
             WhitelistApplications.ReplaceRange(Settings.WhitelistApplications);
             RefreshFilters();
@@ -762,6 +784,7 @@ public sealed class MainViewModel : ObservableObject
             else if (DeviceInfo.Platform == DevicePlatform.iOS)
                 ConnectionStatusMessage = "آماده برای اتصال؛ iOS در اولین اتصال مجوز افزودن VPN را نمایش می‌دهد.";
             RefreshDiagnosticsReport();
+            initialized = loadErrors.Count == 0;
         }
         catch (Exception)
         {
@@ -773,7 +796,13 @@ public sealed class MainViewModel : ObservableObject
         }
         finally
         {
-            _initialized = true;
+            _initialized = initialized;
+            if (loadErrors.Count > 0)
+            {
+                _homeNotice = string.Join("\n", loadErrors);
+                ConnectionStatusMessage = _homeNotice;
+                NotifyHomeChanged();
+            }
             IsBusy = false;
         }
     }
@@ -1463,6 +1492,7 @@ public sealed class MainViewModel : ObservableObject
                     profile.LastTested = DateTime.Now;
                     profile.TestMessage = FormatTestDetails(result);
                     profile.Health = newHealth;
+                    SavedServerPolicy.RememberSuccess(profile);
                     if (!result.Success) profile.FailureCount++; else profile.FailureCount = 0;
                     ProgressDone++;
                     if (newHealth is ProfileHealth.Working or ProfileHealth.Reachable) ProgressWorking++;
@@ -1687,6 +1717,7 @@ public sealed class MainViewModel : ObservableObject
                         p.LastTested = DateTime.Now;
                         p.TestMessage = FormatTestDetails(result);
                         p.Health = newHealth;
+                        SavedServerPolicy.RememberSuccess(p);
                         if (!result.Success) p.FailureCount++; else p.FailureCount = 0;
                         ProgressDone++;
                         if (newHealth is ProfileHealth.Working or ProfileHealth.Reachable) ProgressWorking++;
@@ -1762,7 +1793,7 @@ public sealed class MainViewModel : ObservableObject
     private static ConfigProfile? GetConnectableProfile(ConfigProfile? profile) =>
         profile is null
             ? null
-            : profile.Health == ProfileHealth.Working || IsTrustedCommunityCandidate(profile)
+            : SavedServerPolicy.IsSaved(profile) || IsTrustedCommunityCandidate(profile)
                 ? profile
                 : null;
 
@@ -1848,6 +1879,7 @@ public sealed class MainViewModel : ObservableObject
                         profile.Health = ProfileHealth.Working;
                         profile.LatencyMs = validation.LatencyMs ?? profile.LatencyMs;
                         profile.LastTested = DateTime.Now;
+                        SavedServerPolicy.RememberSuccess(profile);
                         profile.TestMessage = HumanizeTestResult(validation);
                         profile.FailureCount = 0;
                         SelectedHealthyProfile = profile;
@@ -1922,7 +1954,7 @@ public sealed class MainViewModel : ObservableObject
         yield return first;
 
         foreach (var profile in Profiles
-                     .Where(x => x.Id != first.Id && (x.Health == ProfileHealth.Working || IsTrustedCommunityCandidate(x)))
+                     .Where(x => x.Id != first.Id && (SavedServerPolicy.IsSaved(x) || IsTrustedCommunityCandidate(x)))
                      .OrderByDescending(x => x.QualityScore)
                      .ThenBy(x => x.LatencyMs ?? int.MaxValue)
                      .ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase))
@@ -2338,7 +2370,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void RefreshHealthyProfiles()
     {
-        var selectedId = SelectedHealthyProfile?.Id;
+        var selectedId = SelectedHealthyProfile?.Id ?? Settings.SelectedServerId;
         var healthy = Profiles
             .Where(x => x.Health == ProfileHealth.Working)
             .OrderByDescending(x => x.QualityScore)
@@ -2347,16 +2379,18 @@ public sealed class MainViewModel : ObservableObject
             .ToList();
 
         HealthyProfiles.ReplaceRange(healthy);
-        NotifyHomeChanged();
+        var saved = SavedServerPolicy.ForHome(Profiles, selectedId, SimpleSearchHealthyTarget);
+        HomeServers.ReplaceRange(saved.Select((profile, index) => new HomeServerViewModel(profile, index + 1)));
         _recommendedHealthyProfile = healthy.FirstOrDefault() ?? Profiles
             .Where(IsTrustedCommunityCandidate)
             .OrderByDescending(x => x.QualityScore)
             .ThenBy(x => x.CommunityLatencyMs ?? int.MaxValue)
             .ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase)
             .FirstOrDefault();
-        var next = selectedId is null ? null : healthy.FirstOrDefault(x => x.Id == selectedId);
-        next ??= healthy.FirstOrDefault();
+        var next = saved.FirstOrDefault(x => x.Id == selectedId) ?? saved.FirstOrDefault();
         SelectedHealthyProfile = next;
+        foreach (var row in HomeServers) row.RefreshSelection(row.Profile.Id == SelectedHealthyProfile?.Id);
+        NotifyHomeChanged();
         OnPropertyChanged(nameof(HealthyProfilesCount));
         OnPropertyChanged(nameof(HealthyProfilesCountText));
         OnPropertyChanged(nameof(SelectedHealthyPingText));

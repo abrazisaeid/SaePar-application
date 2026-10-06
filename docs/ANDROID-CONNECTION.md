@@ -1,5 +1,37 @@
 # Android connection recovery (2.0.24)
 
+## Saved home servers and individual sharing (2.0.26)
+
+The home picker previously filtered exclusively on the latest `Working` status.
+A failed standalone retest could therefore hide all previously discovered
+servers on restart, even though their records remained in `profiles.json`.
+Profiles now retain the last successful full-proxy test and its latency separately
+from the latest result. Home shows up to five saved servers, permits another
+connection attempt, and labels failed retests and previous latency explicitly.
+Current healthy totals still count only the latest successful results, and
+connection still requires actual full-proxy validation before showing connected.
+Normal old-server cleanup continues to remove eligible failed entries.
+
+Legacy working profiles are migrated when loaded. For existing failed records,
+an available backup can restore prior successful-test history for matching IDs;
+it never resurrects removed records or overrides the latest failure. Missing
+historical information cannot be reconstructed if no valid backup contains it.
+
+The selected server ID is persisted. Home lists individual numbered rows with
+selection, latency, last-test information and an independent Share action for
+that exact profile (text, clipboard or QR), including while connected.
+
+Startup restores profile data independently from settings. A settings read error
+does not suppress profile restoration; initialization remains retryable after a
+load error. A cache whose read failed cannot be overwritten with defaults until
+it is successfully read again, preserving primary and backup files for recovery.
+
+Validation: 119 regression tests passed, including the actual application store
+with only the platform directory provider substituted, migration, backup history,
+no deleted-server resurrection, five retained failed-retest records after restart,
+third-server selection and unreadable-settings write protection. Native device
+UI, sharing and mobile-network VPN connectivity still need device verification.
+
 ## GeoIP and cache persistence correction (2.0.25)
 
 The production routing builder previously used `geoip:private`, although the

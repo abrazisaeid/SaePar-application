@@ -16,6 +16,7 @@ public sealed class AppSettings
     public bool FastTestMode { get; set; } = true;
     public bool QuickMode { get; set; } = true;
     public bool AutoReconnect { get; set; } = true;
+    public string SelectedServerId { get; set; } = string.Empty;
     public int AutoReconnectAttempts { get; set; } = 3;
     public bool EnableCommunityHealth { get; set; }
     public string CommunityHealthIndexUrl { get; set; } = string.Empty;

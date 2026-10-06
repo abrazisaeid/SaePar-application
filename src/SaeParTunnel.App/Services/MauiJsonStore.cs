@@ -7,12 +7,16 @@ namespace SaeParTunnel.App.Services;
 public sealed class MauiJsonStore
 {
     private readonly JsonCacheStore _files = new();
+    private readonly string? _rootPath;
+    public MauiJsonStore() { }
+    internal MauiJsonStore(string rootPath) { _rootPath = rootPath; }
     public string LastStorageError { get; private set; } = string.Empty;
 
     public string RootPath
     {
         get
         {
+            if (_rootPath is not null) return _rootPath;
 #if WINDOWS
             // Reuse v1.x data automatically on Windows.
             return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SaeParTunnel");
@@ -72,12 +76,25 @@ public sealed class MauiJsonStore
     public async Task<List<ConfigProfile>> LoadProfilesAsync()
     {
         var profiles = await ReadAsync<List<ConfigProfile>>(ProfilesPath) ?? new();
+        var previous = new List<ConfigProfile>();
+        if (profiles.Any(p => p.Health == ProfileHealth.Failed && !p.LastSuccessfulTest.HasValue) &&
+            File.Exists(ProfilesPath + ".bak"))
+        {
+            // Upgrade recovery only: recover success history for existing IDs,
+            // never bring back entries removed by the cleanup policy.
+            try { previous = await Task.Run(() => _files.ReadAsync<List<ConfigProfile>>(ProfilesPath + ".bak")) ?? new(); }
+            catch (IOException) { /* An optional old backup must not block a valid primary. */ }
+        }
         return await Task.Run(() =>
         {
             var parser = new ConfigParser();
+            var history = previous.GroupBy(ConfigParser.ComputeId).ToDictionary(g => g.Key,
+                g => g.OrderByDescending(p => p.Health == ProfileHealth.Working)
+                    .ThenByDescending(p => p.LastSuccessfulTest ?? p.LastTested).First());
             foreach (var profile in profiles)
             {
                 profile.Id = ConfigParser.ComputeId(profile);
+                if (!profile.LastSuccessfulTest.HasValue) SavedServerPolicy.RememberSuccess(profile);
                 // Older caches predate the engine's removed-feature checks.
                 var parsed = string.IsNullOrWhiteSpace(profile.OriginalUri)
                     ? null : parser.Parse(profile.OriginalUri, profile.Source, out _);
@@ -88,8 +105,10 @@ public sealed class MauiJsonStore
                 }
                 if (profile.Health == ProfileHealth.Testing)
                     profile.Health = ProfileHealth.Untested;
+                if (history.TryGetValue(profile.Id, out var prior)) SavedServerPolicy.RecoverHistory(profile, prior);
             }
-            return profiles.DistinctBy(p => p.Id).ToList();
+            return profiles.OrderByDescending(p => p.Health == ProfileHealth.Working)
+                .ThenByDescending(p => p.LastSuccessfulTest).DistinctBy(p => p.Id).ToList();
         });
     }
     public Task SaveProfilesAsync(IEnumerable<ConfigProfile> profiles) => WriteAsync(ProfilesPath, profiles.ToList());

@@ -24,6 +24,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Compile Include="..\..\src\SaeParTunnel.App\Platforms\Android\AndroidVpnRuntime.cs" Link="AndroidVpnRuntime.cs" />
+    <Compile Include="..\..\src\SaeParTunnel.App\Services\MauiJsonStore.cs" Link="MauiJsonStore.cs" />
   </ItemGroup>
 
 </Project>

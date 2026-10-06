@@ -48,6 +48,9 @@ public sealed class ConfigProfile : INotifyPropertyChanged
     public string Source { get; set; } = "دستی";
     public DateTime FirstSeen { get; set; } = DateTime.Now;
     public DateTime LastSeen { get; set; } = DateTime.Now;
+    // Keep discovery history independently of the latest (possibly offline) probe.
+    public DateTime? LastSuccessfulTest { get; set; }
+    public int? LastSuccessfulLatencyMs { get; set; }
     public int FailureCount
     {
         get => _failureCount;

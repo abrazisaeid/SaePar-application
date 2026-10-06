@@ -2,18 +2,17 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:SaeParTunnel.App.ViewModels"
-             xmlns:models="clr-namespace:SaeParTunnel.Core.Models;assembly=SaeParTunnel.Core"
-             x:Class="SaeParTunnel.App.Pages.DashboardPage"
+             x:Class="SaeParTunnel.App.Pages.DashboardPage" x:Name="DashboardRoot"
              x:DataType="vm:MainViewModel" Title="اتصال">
     <ScrollView>
-        <VerticalStackLayout Padding="24,32" Spacing="24" MaximumWidthRequest="480" HorizontalOptions="Fill">
+        <VerticalStackLayout Padding="16,24" Spacing="18" MaximumWidthRequest="480" HorizontalOptions="Fill">
             <VerticalStackLayout Spacing="4">
                 <Label Text="SaePar" FontSize="26" FontAttributes="Bold" FlowDirection="LeftToRight" HorizontalTextAlignment="Center" />
                 <Label Text="ساده وصل شو" Style="{StaticResource SubtleLabel}" HorizontalTextAlignment="Center" />
             </VerticalStackLayout>
 
-            <Border Style="{StaticResource Card}" Padding="24" StrokeShape="RoundRectangle 24">
-                <VerticalStackLayout Spacing="20">
+            <Border Style="{StaticResource Card}" Padding="16" StrokeShape="RoundRectangle 24">
+                <VerticalStackLayout Spacing="16">
                     <Border WidthRequest="64" HeightRequest="64" StrokeThickness="0" StrokeShape="RoundRectangle 32"
                             BackgroundColor="{StaticResource Surface2}" HorizontalOptions="Center">
                         <Label Text="○" FontSize="36" HorizontalTextAlignment="Center" VerticalTextAlignment="Center"
@@ -32,11 +31,43 @@
                     <ActivityIndicator IsRunning="{Binding IsBusy}" IsVisible="{Binding IsBusy}" Color="{StaticResource Accent}" HeightRequest="24" />
 
                     <VerticalStackLayout Spacing="8" IsVisible="{Binding HasHomeServers}">
-                        <Label Text="سرور" Style="{StaticResource SubtleLabel}" />
-                        <Picker Title="انتخاب سرور" ItemsSource="{Binding HealthyProfiles}"
-                                SelectedItem="{Binding SelectedHealthyProfile}" IsEnabled="{Binding CanSearchServers}"
-                                ItemDisplayBinding="{Binding DisplayName, x:DataType=models:ConfigProfile}"
-                                SemanticProperties.Description="انتخاب سرور برای اتصال" />
+                        <Label Text="سرورهای ذخیره‌شده" FontAttributes="Bold" />
+                        <Label Text="برای انتخاب، روی نام سرور بزن." Style="{StaticResource SubtleLabel}" />
+                        <VerticalStackLayout BindableLayout.ItemsSource="{Binding HomeServers}" Spacing="8">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate x:DataType="vm:HomeServerViewModel">
+                                    <Border BackgroundColor="{StaticResource Surface2}" Stroke="{StaticResource Border}"
+                                            StrokeThickness="1" StrokeShape="RoundRectangle 12" Padding="8">
+                                        <Border.Triggers>
+                                            <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                                <Setter Property="Stroke" Value="{StaticResource Accent}" />
+                                                <Setter Property="StrokeThickness" Value="2" />
+                                            </DataTrigger>
+                                        </Border.Triggers>
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                            <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="24,*" RowSpacing="3"
+                                                  IsEnabled="{Binding BindingContext.CanSearchServers, Source={x:Reference DashboardRoot}, x:DataType={x:Null}}">
+                                                <Grid.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding BindingContext.SelectHomeServerCommand, Source={x:Reference DashboardRoot}, x:DataType={x:Null}}"
+                                                                          CommandParameter="{Binding Profile}" />
+                                                </Grid.GestureRecognizers>
+                                                <Label Text="{Binding SelectionGlyph}" FontSize="20" TextColor="{StaticResource Accent}" VerticalOptions="Center" />
+                                                <Label Grid.Column="1" Text="{Binding Name}" FontAttributes="Bold" FontSize="14" MaxLines="1"
+                                                       LineBreakMode="TailTruncation" VerticalOptions="Center" />
+                                                <Label Grid.Row="1" Grid.Column="1" Text="{Binding Ping}" FontSize="13" FlowDirection="LeftToRight"
+                                                       TextColor="{StaticResource Accent}" />
+                                                <Label Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding TestStatus}" Style="{StaticResource SubtleLabel}"
+                                                       FontSize="12" LineBreakMode="WordWrap" />
+                                            </Grid>
+                                            <Button Grid.Column="1" Text="اشتراک" FontSize="12" Padding="10,8" MinimumHeightRequest="44"
+                                                    VerticalOptions="Center" BackgroundColor="Transparent" TextColor="{StaticResource Accent}"
+                                                    Command="{Binding BindingContext.ShareProfileCommand, Source={x:Reference DashboardRoot}, x:DataType={x:Null}}"
+                                                    CommandParameter="{Binding Profile}" SemanticProperties.Description="اشتراک همین سرور" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                             <Button Text="{Binding PingButtonText}" Command="{Binding PingSelectedServerCommand}"
                                     IsEnabled="{Binding CanPingSelectedServer}" BackgroundColor="Transparent"

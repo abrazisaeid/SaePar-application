@@ -97,4 +97,31 @@ public sealed class CachePersistenceTests : IDisposable
     {
         Assert.Null(await new JsonCacheStore().ReadAsync<List<ConfigProfile>>(PathFor("profiles.json")));
     }
+
+    [Fact]
+    public async Task UnreadableSettingsCannotOverwritePriorDataAndDoNotBlockProfileRecovery()
+    {
+        var store = new JsonCacheStore();
+        await store.WriteAsync(PathFor("profiles.json"), Healthy());
+        await File.WriteAllTextAsync(PathFor("settings.json"), "{broken");
+        await Assert.ThrowsAsync<IOException>(() => store.ReadAsync<AppSettings>(PathFor("settings.json")));
+        Assert.Equal(5, (await store.ReadAsync<List<ConfigProfile>>(PathFor("profiles.json")))!.Count);
+        await Assert.ThrowsAsync<IOException>(() => store.WriteAsync(PathFor("settings.json"), new AppSettings()));
+        Assert.Equal("{broken", await File.ReadAllTextAsync(PathFor("settings.json")));
+    }
+
+    [Fact]
+    public async Task RestoringAnUnreadableCacheAllowsSavingAfterSuccessfulReload()
+    {
+        Directory.CreateDirectory(_directory);
+        var path = PathFor("profiles.json");
+        var store = new JsonCacheStore();
+        await File.WriteAllTextAsync(path, "[broken");
+        await Assert.ThrowsAsync<IOException>(() => store.ReadAsync<List<ConfigProfile>>(path));
+        await File.WriteAllTextAsync(path + ".bak", JsonSerializer.Serialize(Healthy(), StorageJsonContext.Default.ListConfigProfile));
+        var recovered = (await store.ReadAsync<List<ConfigProfile>>(path))!;
+        recovered[2].Remark = "updated";
+        await store.WriteAsync(path, recovered);
+        Assert.Equal("updated", (await new JsonCacheStore().ReadAsync<List<ConfigProfile>>(path))![2].Remark);
+    }
 }

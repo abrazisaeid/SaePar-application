@@ -7,6 +7,7 @@ namespace SaeParTunnel.Core.Services;
 public sealed class JsonCacheStore
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly HashSet<string> _unreadablePaths = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<T?> ReadAsync<T>(string path)
     {
@@ -32,10 +33,15 @@ public sealed class JsonCacheStore
                 }
                 if (candidate != path)
                     await WriteCoreAsync(path, value, info, keepBackup: false).ConfigureAwait(false);
+                _unreadablePaths.Remove(Path.GetFullPath(path));
                 return value;
             }
             if (lastError is not null)
+            {
+                _unreadablePaths.Add(Path.GetFullPath(path));
                 throw new IOException("دادهٔ ذخیره‌شده قابل خواندن نیست؛ فایل‌ها برای بازیابی حفظ شده‌اند.", lastError);
+            }
+            _unreadablePaths.Remove(Path.GetFullPath(path));
             return default;
         }
         finally { _gate.Release(); }
@@ -45,7 +51,12 @@ public sealed class JsonCacheStore
     {
         var info = GetTypeInfo<T>();
         await _gate.WaitAsync().ConfigureAwait(false);
-        try { await WriteCoreAsync(path, value, info, keepBackup: true).ConfigureAwait(false); }
+        try
+        {
+            if (_unreadablePaths.Contains(Path.GetFullPath(path)))
+                throw new IOException("ذخیره متوقف شد تا دادهٔ قبلیِ خوانده‌نشده بازنویسی نشود.");
+            await WriteCoreAsync(path, value, info, keepBackup: true).ConfigureAwait(false);
+        }
         finally { _gate.Release(); }
     }
 
