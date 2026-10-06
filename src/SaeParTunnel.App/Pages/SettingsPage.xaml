@@ -48,9 +48,11 @@
                         <Label Text="پاک‌سازی خودکار" VerticalOptions="Center" />
                         <Switch Grid.Column="1" IsToggled="{Binding Settings.AutoCleanupOldServers}" />
                     </Grid>
-                    <Label Text="سرورهای با عمر حداقل ۷ روز، پس از ۳ تست ناموفق پیاپی حذف می‌شوند. برای جلوگیری از حذف هنگام قطعی اینترنت، یک تست سالم در ۱۵ دقیقهٔ اخیر لازم است. سرور فعال حذف نمی‌شود."
+                    <Label Text="سرور بی‌پاسخ فوراً از صفحهٔ اول کنار می‌رود و برای بررسی مجدد در آرشیو می‌ماند. سرورهای با عمر حداقل ۷ روز، پس از ۳ تست ناموفق پیاپی حذف می‌شوند. یک تست سالم در ۱۵ دقیقهٔ اخیر لازم است؛ سرور فعال حذف نمی‌شود."
                            Style="{StaticResource SubtleLabel}" />
                     <Button Text="پاک‌سازی الان" Command="{Binding CleanupOldServersCommand}" IsEnabled="{Binding IsNotBusy}" />
+                    <Label Text="{Binding PendingCleanupSummary}" Style="{StaticResource SubtleLabel}" />
+                    <Button Text="دیدن سرورهای بی‌پاسخ" Command="{Binding ViewFailedServersCommand}" IsEnabled="{Binding IsNotBusy}" />
                     <Label Text="{Binding CleanupSummary}" Style="{StaticResource SubtleLabel}" />
                 </VerticalStackLayout>
             </Border>

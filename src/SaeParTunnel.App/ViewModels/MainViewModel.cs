@@ -58,6 +58,7 @@ public sealed class MainViewModel : ObservableObject
     private CancellationTokenSource? _discoveryCts;
     private string _homeNotice = "";
     private bool _isPinging;
+    private CancellationTokenSource? _pingCts;
     private string? _activeProfileId;
     private int? _healthySearchTarget;
     private string _pingFeedback = "";
@@ -106,6 +107,14 @@ public sealed class MainViewModel : ObservableObject
         });
         PingSelectedServerCommand = new Command(async () => await RunSafeAsync(PingSelectedServerAsync));
         CleanupOldServersCommand = new Command(async () => await RunSafeAsync(CleanupOldServersAsync));
+        ViewFailedServersCommand = new Command(async () => await RunSafeAsync(async () =>
+        {
+            SearchText = "";
+            ProtocolFilter = "همه";
+            StatusFilter = "ناموفق";
+            ShowAdvancedConfigTools = true;
+            if (Shell.Current is not null) await Shell.Current.GoToAsync("advanced-configs");
+        }));
         FetchSubscriptionCommand = new Command<SubscriptionSourceViewModel>(async source =>
         {
             if (source is not null) await RunSafeAsync(() => FetchSubscriptionAsync(source));
@@ -229,7 +238,7 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!SetProperty(ref _selectedProfile, value)) return;
             OnPropertyChanged(nameof(SelectedProfileSummary));
-            if (!IsConnected && value is not null && SavedServerPolicy.IsSaved(value) && !ReferenceEquals(_selectedHealthyProfile, value))
+            if (!IsConnected && value is not null && SavedServerPolicy.IsReady(value) && !ReferenceEquals(_selectedHealthyProfile, value))
                 SelectedHealthyProfile = value;
         }
     }
@@ -298,6 +307,8 @@ public sealed class MainViewModel : ObservableObject
     public Command FindServersCommand { get; }
     public Command PingSelectedServerCommand { get; }
     public Command CleanupOldServersCommand { get; }
+    public Command ViewFailedServersCommand { get; }
+    public string PendingCleanupSummary => $"{FailedProfiles:N0} سرور بی‌پاسخ در فهرست بررسی و پاک‌سازی";
     public string CleanupSummary { get => _cleanupSummary; private set => SetProperty(ref _cleanupSummary, value); }
     public bool CanPingSelectedServer => !_isInitializing && SelectedHealthyProfile is not null && IsNotBusy && !_findingServers && !IsConnectionBusy &&
         (!IsConnected || SelectedHealthyProfile.Id == _activeProfileId);
@@ -370,6 +381,8 @@ public sealed class MainViewModel : ObservableObject
     private async Task PingSelectedServerAsync()
     {
         if (!CanPingSelectedServer || SelectedHealthyProfile is not { } profile) return;
+        var wasConnected = IsConnected;
+        var generation = _connectionGeneration;
         _isPinging = true;
         _pingFeedback = "";
         IsBusy = true;
@@ -377,9 +390,20 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            var result = IsConnected
+            _pingCts = deadline;
+            var result = wasConnected
                 ? await _tunnel.TestCurrentConnectionAsync(Settings, deadline.Token)
                 : await _tunnel.TestAsync(profile, Settings, deadline.Token);
+            if (wasConnected && (!IsConnected || generation != _connectionGeneration)) return;
+            var activeTunnelFailed = wasConnected && !result.Success;
+#if ANDROID
+            // A failing TUN ping may be a phone/VPN issue. Confirm server failure
+            // using the isolated, physical-network probe before demoting it.
+            if (activeTunnelFailed)
+                result = await _tunnel.TestAsync(profile, Settings, deadline.Token);
+#endif
+            deadline.Token.ThrowIfCancellationRequested();
+            if (wasConnected && (!IsConnected || generation != _connectionGeneration)) return;
             profile.LatencyMs = result.Success ? result.LatencyMs : null;
             profile.LastTested = DateTime.Now;
             profile.TestMessage = FormatTestDetails(result);
@@ -389,28 +413,38 @@ public sealed class MainViewModel : ObservableObject
                 profile.Health = result.Level == ValidationLevel.FullProxy ? ProfileHealth.Working : ProfileHealth.Reachable;
                 SavedServerPolicy.RememberSuccess(profile);
             }
-            else if (!IsConnected)
+            else
             {
                 profile.FailureCount++;
                 profile.Health = ProfileHealth.Failed;
             }
-            _pingFeedback = result.Success && result.LatencyMs.HasValue
-                ? "پینگ همین الان به‌روز شد."
-                : "پاسخی دریافت نشد؛ می‌توانی دوباره امتحان کنی.";
+            var feedback = result.Success && result.LatencyMs.HasValue
+                ? activeTunnelFailed
+                    ? "اتصال فعال پاسخ نداد، اما خود سرور در تست مستقیم سالم بود."
+                    : "پینگ همین الان به‌روز شد."
+                : result.Success ? "سرور پاسخ داد."
+                : "سرور پاسخ نداد؛ از صفحهٔ اول کنار رفت و وارد فهرست بررسی و پاک‌سازی شد.";
+            // Update the home list before persistence/cleanup, including selecting
+            // a remaining server when the failed one was selected and VPN is off.
+            RefreshStats();
             var removed = await ApplyAutomaticCleanupAsync();
             if (removed > 0) await _store.SaveProfilesAsync(Profiles);
             else await _store.SaveProfileAsync(profile, Profiles);
             RefreshFilters();
             RefreshStats();
+            _pingFeedback = feedback;
+            _homeNotice = result.Success ? "" : feedback;
         }
         catch (OperationCanceledException)
         {
-            profile.LatencyMs = null;
-            _pingFeedback = "زمان دریافت پاسخ تمام شد. دوباره امتحان کن.";
+            _pingFeedback = wasConnected && !IsConnected
+                ? "VPN قطع شد؛ پینگ این سرور متوقف شد."
+                : "تست متوقف شد یا زمان دریافت پاسخ تمام شد؛ سرور حفظ شد.";
         }
         finally
         {
             _isPinging = false;
+            _pingCts = null;
             IsBusy = false;
             OnPropertyChanged(nameof(SelectedHealthyPingText));
             NotifyHomeChanged();
@@ -514,7 +548,7 @@ public sealed class MainViewModel : ObservableObject
     public bool ShowDisconnectAction => IsConnected;
     public bool ShowConnectionTools => !IsConnected && !IsConnectionBusy;
     public bool CanStartConnection => !_isInitializing && IsNotBusy && !IsConnected && !IsConnectionBusy;
-    public bool CanStopConnection => !_isInitializing && (IsNotBusy || _connectedSearch) && IsConnected && !IsConnectionBusy;
+    public bool CanStopConnection => !_isInitializing && (IsNotBusy || _connectedSearch || _isPinging) && IsConnected && !IsConnectionBusy;
     public string ConnectionBadgeText => _connectionUiPhase switch
         {
             ConnectionUiPhase.Connecting => "در حال اتصال",
@@ -531,6 +565,9 @@ public sealed class MainViewModel : ObservableObject
             if (!SetProperty(ref _isConnected, value)) return;
             _connectionGeneration++;
             if (!value && _connectedSearch) CancelTest();
+            if (!value && _isPinging) _pingCts?.Cancel();
+            if (!value && SelectedHealthyProfile is { } selected && !SavedServerPolicy.IsReady(selected))
+                RefreshHealthyProfiles();
             RefreshConnectionActions();
         }
     }
@@ -1611,9 +1648,10 @@ public sealed class MainViewModel : ObservableObject
                     if (newHealth is ProfileHealth.Working or ProfileHealth.Reachable) ProgressWorking++;
                     if (newHealth == ProfileHealth.Working) ProgressFullWorking++;
                     else if (newHealth == ProfileHealth.Failed) ProgressFailed++;
+                    if (newHealth == ProfileHealth.Failed && SavedServerPolicy.IsSaved(profile)) RefreshHealthyProfiles();
                     MaybeUpdateProgress(sw, done, done == ProgressTotal);
                 });
-                if (newHealth == ProfileHealth.Working)
+                if (newHealth == ProfileHealth.Working || (newHealth == ProfileHealth.Failed && SavedServerPolicy.IsSaved(profile)))
                 {
                     await _store.SaveProfileAsync(profile, Profiles);
                     await MainThread.InvokeOnMainThreadAsync(RefreshStats);
@@ -1840,9 +1878,10 @@ public sealed class MainViewModel : ObservableObject
                         if (newHealth is ProfileHealth.Working or ProfileHealth.Reachable) ProgressWorking++;
                         if (newHealth == ProfileHealth.Working) ProgressFullWorking++;
                         else if (newHealth == ProfileHealth.Failed) ProgressFailed++;
+                        if (newHealth == ProfileHealth.Failed && SavedServerPolicy.IsSaved(p)) RefreshHealthyProfiles();
                         MaybeUpdateProgress(sw, done, done == ProgressTotal);
                     });
-                    if (newHealth == ProfileHealth.Working)
+                    if (newHealth == ProfileHealth.Working || (newHealth == ProfileHealth.Failed && SavedServerPolicy.IsSaved(p)))
                         await _store.SaveProfileAsync(p, Profiles);
                 }
                 catch (OperationCanceledException)
@@ -1917,7 +1956,7 @@ public sealed class MainViewModel : ObservableObject
     private static ConfigProfile? GetConnectableProfile(ConfigProfile? profile) =>
         profile is null
             ? null
-            : SavedServerPolicy.IsSaved(profile) || IsTrustedCommunityCandidate(profile)
+            : SavedServerPolicy.IsReady(profile) || IsTrustedCommunityCandidate(profile)
                 ? profile
                 : null;
 
@@ -2172,6 +2211,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (!CanStopConnection) return;
         if (_connectedSearch) CancelTest();
+        _pingCts?.Cancel();
         try { await DisconnectAsync(); }
         catch (Exception ex)
         {
@@ -2185,7 +2225,7 @@ public sealed class MainViewModel : ObservableObject
         yield return first;
 
         foreach (var profile in Profiles
-                     .Where(x => x.Id != first.Id && (SavedServerPolicy.IsSaved(x) || IsTrustedCommunityCandidate(x)))
+                     .Where(x => x.Id != first.Id && (SavedServerPolicy.IsReady(x) || IsTrustedCommunityCandidate(x)))
                      .OrderByDescending(x => x.QualityScore)
                      .ThenBy(x => x.LatencyMs ?? int.MaxValue)
                      .ThenBy(x => x.DisplayName, StringComparer.CurrentCultureIgnoreCase))
@@ -2665,6 +2705,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(WorkingProfiles));
         OnPropertyChanged(nameof(ReachableProfiles));
         OnPropertyChanged(nameof(FailedProfiles));
+        OnPropertyChanged(nameof(PendingCleanupSummary));
         OnPropertyChanged(nameof(UntestedProfiles));
         OnPropertyChanged(nameof(FilteredCount));
         OnPropertyChanged(nameof(VisibleCount));

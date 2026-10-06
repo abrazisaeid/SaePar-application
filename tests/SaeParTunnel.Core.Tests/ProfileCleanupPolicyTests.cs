@@ -17,6 +17,23 @@ public sealed class ProfileCleanupPolicyTests
     };
 
     [Fact]
+    public void FormerHomeServerEntersCleanupAfterRepeatedFailureWithoutLosingHistory()
+    {
+        var failed = Failed(failures: 1);
+        failed.Health = ProfileHealth.Working;
+        failed.LatencyMs = 110;
+        SavedServerPolicy.RememberSuccess(failed);
+        failed.Health = ProfileHealth.Failed;
+        var profiles = new[] { failed, Working() };
+        Assert.DoesNotContain(SavedServerPolicy.ForHome(profiles, failed.Id), profile => profile.Id == failed.Id);
+        Assert.Empty(ProfileCleanupPolicy.FindRemovable(profiles, Now));
+        failed.FailureCount = 3;
+        Assert.Same(failed, Assert.Single(ProfileCleanupPolicy.FindRemovable(profiles, Now)));
+        Assert.NotNull(failed.LastSuccessfulTest);
+        Assert.Equal(110, failed.LastSuccessfulLatencyMs);
+    }
+
+    [Fact]
     public void OldRepeatedFailureIsRemovedButTemporaryFailuresAndNewServersRemain()
     {
         var old = Failed();

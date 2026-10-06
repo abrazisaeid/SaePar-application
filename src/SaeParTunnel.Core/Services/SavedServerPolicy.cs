@@ -15,10 +15,15 @@ public static class SavedServerPolicy
         profile.Health != ProfileHealth.Unsupported &&
         (profile.Health == ProfileHealth.Working || profile.LastSuccessfulTest.HasValue);
 
+    // Keep history in the archive for retry/cleanup, but do not offer a server
+    // whose latest completed test failed, even if it used to work or was selected.
+    public static bool IsReady(ConfigProfile profile) => IsSaved(profile) &&
+        profile.Health is ProfileHealth.Working or ProfileHealth.Untested;
+
     public static IReadOnlyList<ConfigProfile> ForHome(IEnumerable<ConfigProfile> profiles,
         string? selectedId, int limit = 5)
     {
-        var saved = profiles.Where(IsSaved)
+        var saved = profiles.Where(IsReady)
             .OrderByDescending(p => p.Health == ProfileHealth.Working)
             .ThenByDescending(p => p.QualityScore)
             .ThenBy(p => p.LatencyMs ?? p.LastSuccessfulLatencyMs ?? int.MaxValue)

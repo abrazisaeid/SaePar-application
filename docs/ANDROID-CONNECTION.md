@@ -1,5 +1,32 @@
 # Android connection recovery (2.0.24)
 
+## Hide unresponsive home servers (2.0.32)
+
+A completed failed probe removes a previously verified configuration from the
+home list immediately. Its URI and last successful test remain in the archive
+under the Failed filter for retesting and normal cleanup; keeping that history
+does not make it eligible for the home list or automatic connection attempts.
+Neither starting a retest nor a TCP-only success restores it. A full successful
+test restores it and resets consecutive failures.
+
+The failed profile is checkpointed and the fast home cache is updated as soon
+as its result arrives, including during longer discovery runs. A restart, stale
+selected ID, or legacy history recovery cannot put it back in the home list.
+When disconnected, another eligible server becomes selected. Hiding the active
+profile does not disconnect its running VPN; after disconnect, selection moves
+to another eligible server.
+
+If the connected-server ping fails on Android, the app confirms the server with
+the isolated physical-network probe. A failed TUN ping alone therefore does not
+demote a server that still passes its independent test. Cancellation and known
+network/worker infrastructure failures do not increment its failure count.
+Disconnect remains available during ping and cancels it; a result from a connection
+that was disconnected or replaced cannot demote its configuration.
+
+Advanced settings show the failed count and a button opening the failed archive.
+Permanent cleanup still requires three consecutive failures, seven days of age,
+and another recent success; the active profile is protected.
+
 ## Optional discovery during a connection (2.0.31)
 
 After a new connection passes actual VPN validation, Android offers to continue

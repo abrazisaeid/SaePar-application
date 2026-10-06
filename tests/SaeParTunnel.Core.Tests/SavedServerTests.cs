@@ -17,7 +17,7 @@ public sealed class SavedServerTests : IDisposable
     };
 
     [Fact]
-    public async Task OfflineRetestThenRestartKeepsAllFiveServersAndThirdServerSelection()
+    public async Task FailedRetestThenRestartKeepsArchiveHistoryButRemovesFailedHomeServers()
     {
         var profiles = Enumerable.Range(1, 5).Select(Verified).ToList();
         foreach (var profile in profiles) SavedServerPolicy.RememberSuccess(profile);
@@ -39,12 +39,13 @@ public sealed class SavedServerTests : IDisposable
         var restored = (await restarted.ReadAsync<List<ConfigProfile>>(profilesPath))!;
         var settings = (await restarted.ReadAsync<AppSettings>(settingsPath))!;
         var home = SavedServerPolicy.ForHome(restored, settings.SelectedServerId);
-        Assert.Equal(5, home.Count);
-        Assert.All(home, p => Assert.Equal(ProfileHealth.Failed, p.Health));
-        Assert.Equal("3", home[2].Id);
-        Assert.Equal(profiles[2].OriginalUri, home[2].OriginalUri);
-        Assert.Equal(103, home[2].LastSuccessfulLatencyMs);
-        Assert.NotNull(home[2].LastSuccessfulTest);
+        Assert.Empty(home);
+        Assert.Equal(5, restored.Count);
+        Assert.All(restored, p => Assert.Equal(ProfileHealth.Failed, p.Health));
+        var third = restored.Single(p => p.Id == settings.SelectedServerId);
+        Assert.Equal(profiles[2].OriginalUri, third.OriginalUri);
+        Assert.Equal(103, third.LastSuccessfulLatencyMs);
+        Assert.NotNull(third.LastSuccessfulTest);
     }
 
     [Fact]
@@ -75,6 +76,7 @@ public sealed class SavedServerTests : IDisposable
         profile.LatencyMs = null;
         SavedServerPolicy.RememberSuccess(profile);
         Assert.True(SavedServerPolicy.IsSaved(profile));
+        Assert.False(SavedServerPolicy.IsReady(profile));
         Assert.Equal(101, profile.LastSuccessfulLatencyMs);
     }
 
@@ -94,9 +96,46 @@ public sealed class SavedServerTests : IDisposable
         var previous = Verified(1);
         SavedServerPolicy.RecoverHistory(current, previous);
         Assert.True(SavedServerPolicy.IsSaved(current));
+        Assert.False(SavedServerPolicy.IsReady(current));
         Assert.Equal(ProfileHealth.Failed, current.Health);
         Assert.Null(current.LatencyMs);
         Assert.Equal(previous.LastTested, current.LastSuccessfulTest);
         Assert.Equal(previous.LatencyMs, current.LastSuccessfulLatencyMs);
+    }
+
+    [Fact]
+    public void SelectedFailedServerDoesNotReturnToHomeAndRemainingServersStayInOrder()
+    {
+        var profiles = Enumerable.Range(1, 5).Select(Verified).ToArray();
+        foreach (var profile in profiles) SavedServerPolicy.RememberSuccess(profile);
+        profiles[2].Health = ProfileHealth.Failed;
+        profiles[2].FailureCount = 1;
+        profiles[2].LatencyMs = null;
+        var home = SavedServerPolicy.ForHome(profiles, profiles[2].Id);
+        Assert.Equal(new[] { "1", "2", "4", "5" }, home.Select(profile => profile.Id));
+        Assert.DoesNotContain(home, profile => profile.Id == profiles[2].Id);
+        Assert.True(SavedServerPolicy.IsSaved(profiles[2]));
+    }
+
+    [Fact]
+    public void SuccessfulFullRetestReturnsHiddenServerToHome()
+    {
+        var profile = Verified(1);
+        SavedServerPolicy.RememberSuccess(profile);
+        profile.Health = ProfileHealth.Failed;
+        profile.FailureCount = 2;
+        Assert.Empty(SavedServerPolicy.ForHome(new[] { profile }, profile.Id));
+        profile.Health = ProfileHealth.Testing;
+        Assert.Empty(SavedServerPolicy.ForHome(new[] { profile }, profile.Id));
+        profile.Health = ProfileHealth.Reachable;
+        Assert.Empty(SavedServerPolicy.ForHome(new[] { profile }, profile.Id));
+        profile.Health = ProfileHealth.Working;
+        profile.LastTested = DateTime.Now;
+        profile.LatencyMs = 80;
+        profile.FailureCount = 0;
+        SavedServerPolicy.RememberSuccess(profile);
+        Assert.Same(profile, Assert.Single(SavedServerPolicy.ForHome(new[] { profile }, profile.Id)));
+        Assert.Equal(80, profile.LastSuccessfulLatencyMs);
+        Assert.Empty(ProfileCleanupPolicy.FindRemovable(new[] { profile }, DateTime.Now));
     }
 }

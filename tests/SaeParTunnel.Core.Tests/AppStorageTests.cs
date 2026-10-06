@@ -89,7 +89,8 @@ public sealed class AppStorageTests : IDisposable
         await store.WriteAsync(path, profiles);
         var restored = await new MauiJsonStore(_directory).LoadProfilesAsync();
         Assert.Equal(4, restored.Count);
-        Assert.Equal(4, SavedServerPolicy.ForHome(restored, null).Count);
+        Assert.Empty(SavedServerPolicy.ForHome(restored, null));
+        Assert.All(restored, p => Assert.NotNull(p.LastSuccessfulTest));
         Assert.All(restored, p => Assert.Equal(ProfileHealth.Failed, p.Health));
         Assert.DoesNotContain(restored, p => p.Address == "server5.example");
     }
@@ -131,6 +132,32 @@ public sealed class AppStorageTests : IDisposable
         var settings = await restarted.LoadSettingsAsync();
         var home = await restarted.LoadHomeServersAsync();
         Assert.Contains(home, p => p.Id == settings.SelectedServerId && p.OriginalUri == profiles[2].OriginalUri);
+    }
+
+    [Fact]
+    public async Task FailedSingleProfileCheckpointRemovesServerFromHomeButKeepsArchiveAfterRestart()
+    {
+        var profiles = Profiles();
+        var store = new MauiJsonStore(_directory);
+        await store.SaveSettingsAsync(new AppSettings { SelectedServerId = profiles[2].Id });
+        await store.SaveProfilesAsync(profiles);
+        profiles[2].Health = ProfileHealth.Failed;
+        profiles[2].FailureCount = 1;
+        profiles[2].LastTested = DateTime.Now;
+        profiles[2].LatencyMs = null;
+        await store.SaveProfileAsync(profiles[2], profiles);
+        var restarted = new MauiJsonStore(_directory);
+        await restarted.LoadSettingsAsync();
+        var home = await restarted.LoadHomeServersAsync();
+        Assert.Equal(4, home.Count);
+        Assert.DoesNotContain(home, profile => profile.Id == profiles[2].Id);
+        var archive = await restarted.LoadProfilesAsync();
+        Assert.Equal(5, archive.Count);
+        var failed = archive.Single(profile => profile.Id == profiles[2].Id);
+        Assert.Equal(ProfileHealth.Failed, failed.Health);
+        Assert.Equal(1, failed.FailureCount);
+        Assert.NotNull(failed.LastSuccessfulTest);
+        Assert.Empty(ProfileCleanupPolicy.FindRemovable(archive, DateTime.Now));
     }
 
     [Fact]
