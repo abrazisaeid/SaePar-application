@@ -89,6 +89,29 @@ public sealed class DiscoveryRegressionTests
     }
 
     [Fact]
+    public async Task AndroidDirectDiscoveryUsesOneDownloadWithoutAProxyAttempt()
+    {
+        var proxyCalls = 0;
+        var directCalls = 0;
+        using var service = new GitHubConfigService(new Handler(_ =>
+        {
+            Interlocked.Increment(ref proxyCalls);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway));
+        }), new Handler(_ =>
+        {
+            Interlocked.Increment(ref directCalls);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("vless://user@example.com:443")
+            });
+        }), directOnly: true);
+        var result = await service.FetchAsync("https://example.com/sub", null);
+        Assert.True(result.UsedDirectConnection);
+        Assert.Equal(0, proxyCalls);
+        Assert.Equal(1, directCalls);
+    }
+
+    [Fact]
     public async Task DirectRouteDoesNotWaitForStaleProxy()
     {
         using var service = new GitHubConfigService(new Handler(async ct =>

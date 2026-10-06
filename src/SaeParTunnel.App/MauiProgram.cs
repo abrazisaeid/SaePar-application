@@ -17,7 +17,17 @@ public static class MauiProgram
 
         builder.Services.AddSingleton<ConfigParser>();
         builder.Services.AddSingleton<ConfigExtractor>();
+#if ANDROID
+        builder.Services.AddSingleton<Platforms.Android.AndroidDirectNetwork>();
+        builder.Services.AddSingleton<IEndpointConnector>(provider => provider.GetRequiredService<Platforms.Android.AndroidDirectNetwork>());
+        builder.Services.AddSingleton<GitHubConfigService>(provider =>
+        {
+            var network = provider.GetRequiredService<Platforms.Android.AndroidDirectNetwork>();
+            return new GitHubConfigService(network.CreateHttpHandler(), network.CreateHttpHandler(), directOnly: true);
+        });
+#else
         builder.Services.AddSingleton<GitHubConfigService>();
+#endif
         builder.Services.AddSingleton<CommunityHealthService>();
         builder.Services.AddSingleton<XrayConfigBuilder>();
         builder.Services.AddSingleton<EndpointPrecheckService>();

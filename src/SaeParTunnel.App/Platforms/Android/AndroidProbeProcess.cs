@@ -38,9 +38,12 @@ internal sealed class AndroidProbeProcess
                 // bounded once the handshake finishes.
                 deadline.CancelAfter(TimeSpan.FromSeconds(seconds + 4));
                 Task<string>? result = null;
-                await MainThread.InvokeOnMainThreadAsync(() => { result = connection.Send(token, port, seconds); })
+                var network = AndroidDirectNetwork.GetNetwork();
+                await MainThread.InvokeOnMainThreadAsync(() => { result = connection.Send(token, port, seconds, network); })
                     .ConfigureAwait(false);
-                return await result!.WaitAsync(deadline.Token).ConfigureAwait(false);
+                var response = await result!.WaitAsync(deadline.Token).ConfigureAwait(false);
+                AndroidDirectNetwork.EnsureAvailable(network);
+                return response;
             }
             catch (System.OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -155,7 +158,7 @@ internal sealed class AndroidProbeProcess
         public void OnBindingDied(ComponentName? name) => Close();
         public void OnNullBinding(ComponentName? name) => Close();
 
-        public Task<string> Send(string token, int port, int seconds)
+        public Task<string> Send(string token, int port, int seconds, global::Android.Net.Network network)
         {
             _result = new(TaskCreationOptions.RunContinuationsAsynchronously);
             using var message = Message.Obtain(null, SaeParProbeService.Run);
@@ -164,6 +167,7 @@ internal sealed class AndroidProbeProcess
             message.Data.PutString("token", token);
             message.Data.PutInt("port", port);
             message.Data.PutInt("seconds", seconds);
+            message.Data.PutParcelable("network", network);
             (_remote ?? throw new TunnelStartupException("ارتباط با موتور تست قطع شد.")).Send(message);
             return _result.Task;
         }
@@ -240,6 +244,10 @@ public sealed class SaeParProbeService : Service
             var token = message.Data?.GetString("token") ?? string.Empty;
             var port = message.Data?.GetInt("port") ?? 0;
             var seconds = Math.Clamp(message.Data?.GetInt("seconds") ?? 4, 1, 7);
+            // Parcelable Network works on our minimum API 24, unlike FromNetworkHandle (API 28).
+#pragma warning disable CA1422
+            var network = message.Data?.GetParcelable("network") as global::Android.Net.Network;
+#pragma warning restore CA1422
             if (Interlocked.CompareExchange(ref owner._running, 1, 0) != 0) return;
             _ = Task.Run(async () =>
             {
@@ -249,6 +257,16 @@ public sealed class SaeParProbeService : Service
                 try
                 {
                     if (port is < 1 or > 65535) throw new ArgumentException("Invalid probe port.");
+                    if (network is null) throw new TunnelStartupException("Probe network is missing.");
+                    AndroidDirectNetwork.EnsureAvailable(network);
+                    if (!AndroidDirectNetwork.Manager.BindProcessToNetwork(network))
+                        throw new TunnelStartupException("Probe network disconnected.");
+                    var dns = AndroidDirectNetwork.Manager.GetLinkProperties(network)?.DnsServers?
+                        .Select(address => address.HostAddress).FirstOrDefault(address => !string.IsNullOrWhiteSpace(address));
+                    // Explicit FD binding also covers Go sockets, which may bypass
+                    // libc process binding. The bootstrap resolver uses the same network.
+                    SaeParXrayBridge.AttachProbeNetwork(network,
+                        dns is null ? "" : dns.Contains(':') ? $"[{dns}]:53" : $"{dns}:53");
                     var cache = owner.CacheDir!.AbsolutePath;
                     var store = new TunnelConfigurationStore(Path.Combine(cache, "probe-config"));
                     var config = await store.ConsumeAsync(token).ConfigureAwait(false);
@@ -263,7 +281,11 @@ public sealed class SaeParProbeService : Service
                         apiVersion = 1, method = "ping",
                         payload = new { configPath = path, timeout = seconds, url = "https://cp.cloudflare.com/", proxy = $"socks5://127.0.0.1:{port}" }
                     });
-                    result.Data.PutString("response", SaeParXrayBridge.Invoke(request));
+                    var response = SaeParXrayBridge.Invoke(request);
+                    AndroidDirectNetwork.EnsureAvailable(network);
+                    if (SaeParXrayBridge.ProbeBindingFailed)
+                        throw new TunnelStartupException("Probe socket could not bind to the physical network.");
+                    result.Data.PutString("response", response);
                 }
                 catch (Exception) { result.Data.PutString("error", "موتور تست اندروید با خطا متوقف شد؛ دوباره امتحان کن."); }
                 finally

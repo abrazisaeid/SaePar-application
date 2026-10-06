@@ -59,6 +59,9 @@ public sealed class AndroidTunnelService : ITunnelService
         if (profile.Health == ProfileHealth.Unsupported)
             return new TestResult(false, null, profile.TestMessage, ValidationLevel.None);
 
+        using var physicalScope = AndroidDirectNetwork.BeginScope();
+        var physicalNetwork = AndroidDirectNetwork.GetNetwork();
+
         // Cheap endpoint rejection first; this keeps dead subscription entries from
         // paying the native Xray startup cost.
         if (settings.FastTestMode && !string.Equals(profile.Network, "mkcp", StringComparison.OrdinalIgnoreCase))
@@ -67,6 +70,7 @@ public sealed class AndroidTunnelService : ITunnelService
                 profile,
                 settings.FastTestMode ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(4),
                 cancellationToken).ConfigureAwait(false);
+            AndroidDirectNetwork.EnsureAvailable(physicalNetwork);
             if (!precheck.Success)
                 return precheck;
         }

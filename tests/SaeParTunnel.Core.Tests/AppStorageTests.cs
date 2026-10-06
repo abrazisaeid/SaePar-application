@@ -36,6 +36,29 @@ public sealed class AppStorageTests : IDisposable
     }
 
     [Fact]
+    public async Task TenBackupServersSurviveFastCacheAndArchiveRestartWithSelectedServerPreserved()
+    {
+        var parser = new ConfigParser();
+        var profiles = Enumerable.Range(1, 10).Select(i =>
+        {
+            var profile = parser.Parse($"vless://11111111-1111-1111-1111-111111111111@backup{i}.example:443?type=tcp&security=none#backup{i}", "test", out _)!;
+            profile.Health = ProfileHealth.Working;
+            profile.LastTested = DateTime.Now;
+            profile.LatencyMs = 100 + i;
+            return profile;
+        }).ToList();
+        var store = new MauiJsonStore(_directory);
+        await store.SaveSettingsAsync(new AppSettings { SelectedServerId = profiles[2].Id });
+        await store.SaveProfilesAsync(profiles);
+        var restarted = new MauiJsonStore(_directory);
+        await restarted.LoadSettingsAsync();
+        Assert.Equal(10, (await restarted.LoadHomeServersAsync()).Count);
+        var archive = await restarted.LoadProfilesAsync();
+        Assert.Equal(10, archive.Count);
+        Assert.Equal(profiles[2].Id, (await restarted.LoadSettingsAsync()).SelectedServerId);
+    }
+
+    [Fact]
     public async Task ActualAppStoreMigratesLegacyServersAndRestoresThirdServerAfterRestart()
     {
         var store = new MauiJsonStore(_directory);

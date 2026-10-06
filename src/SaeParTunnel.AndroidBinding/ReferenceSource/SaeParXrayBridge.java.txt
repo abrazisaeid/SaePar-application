@@ -1,6 +1,7 @@
 package com.saepar.tunnel.bridge;
 
 import android.net.VpnService;
+import android.net.Network;
 import android.os.ParcelFileDescriptor;
 
 import libXray.DialerController;
@@ -19,6 +20,8 @@ import libXray.LibXray;
 public final class SaeParXrayBridge {
     private static final Object LOCK = new Object();
     private static volatile VpnService activeVpnService;
+    private static volatile Network probeNetwork;
+    private static volatile boolean probeBindingFailed;
     private static boolean controllersRegistered;
 
     private static final DialerController DIALER_CONTROLLER = new DialerController() {
@@ -27,7 +30,16 @@ public final class SaeParXrayBridge {
             VpnService service = activeVpnService;
             // Outside an active VPN there is nothing to protect. This keeps
             // standalone ping/config tests working before a VPN exists.
-            return service == null || service.protect((int) fd);
+            if (service != null) return service.protect((int) fd);
+            Network network = probeNetwork;
+            if (network == null) return true;
+            try (ParcelFileDescriptor duplicate = ParcelFileDescriptor.fromFd((int) fd)) {
+                network.bindSocket(duplicate.getFileDescriptor());
+                return true;
+            } catch (Exception error) {
+                probeBindingFailed = true;
+                return false;
+            }
         }
     };
 
@@ -37,6 +49,24 @@ public final class SaeParXrayBridge {
     public static void initialize() {
         // Intentionally empty. Do not initialize Go just to prepare a fake fd.
     }
+
+    /** Called only inside the isolated :probe process, never on the VPN core. */
+    public static void attachProbeNetwork(Network network, String dnsServer) throws Exception {
+        if (network == null) throw new IllegalArgumentException("Probe network is null");
+        synchronized (LOCK) {
+            probeNetwork = network;
+            probeBindingFailed = false;
+            if (!controllersRegistered) {
+                LibXray.registerDialerController(DIALER_CONTROLLER);
+                controllersRegistered = true;
+            }
+            LibXray.resetDNS();
+            if (dnsServer != null && !dnsServer.trim().isEmpty())
+                LibXray.setDNS(DIALER_CONTROLLER, dnsServer.trim());
+        }
+    }
+
+    public static boolean getProbeBindingFailed() { return probeBindingFailed; }
 
     /**
      * Associates libXray socket protection and DNS with the active VpnService.

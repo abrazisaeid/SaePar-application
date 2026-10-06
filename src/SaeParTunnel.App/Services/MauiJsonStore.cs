@@ -96,11 +96,11 @@ public sealed class MauiJsonStore
             if (profile.Health == ProfileHealth.Testing) profile.Health = ProfileHealth.Untested;
             if (!profile.LastSuccessfulTest.HasValue) SavedServerPolicy.RememberSuccess(profile);
         }
-        return SavedServerPolicy.ForHome(profiles, _selectedServerId).ToList();
+        return SavedServerPolicy.ForHome(profiles, _selectedServerId, ConnectedDiscoveryPolicy.HealthyTarget).ToList();
     }
 
     public Task SaveHomeServersAsync(IEnumerable<ConfigProfile> profiles) => WriteAsync(HomeServersPath,
-        new HomeServerSnapshot { Profiles = SavedServerPolicy.ForHome(profiles, _selectedServerId).ToList() });
+        new HomeServerSnapshot { Profiles = SavedServerPolicy.ForHome(profiles, _selectedServerId, ConnectedDiscoveryPolicy.HealthyTarget).ToList() });
     public async Task<List<ConfigProfile>> LoadProfilesAsync()
     {
         try

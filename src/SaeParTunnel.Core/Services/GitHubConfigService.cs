@@ -30,6 +30,7 @@ public sealed class GitHubConfigService : IDisposable
     private readonly HttpClient _systemProxyClient;
     private readonly HttpClient _directClient;
     private readonly TimeSpan _attemptTimeout;
+    private readonly bool _directOnly;
     private const int MaxContentBytes = 32 * 1024 * 1024;
 
     public GitHubConfigService() : this(
@@ -39,11 +40,12 @@ public sealed class GitHubConfigService : IDisposable
     }
 
     public GitHubConfigService(HttpMessageHandler systemHandler, HttpMessageHandler directHandler,
-        TimeSpan? attemptTimeout = null)
+        TimeSpan? attemptTimeout = null, bool directOnly = false)
     {
         _systemProxyClient = CreateClient(systemHandler);
         _directClient = CreateClient(directHandler);
         _attemptTimeout = attemptTimeout ?? TimeSpan.FromSeconds(15);
+        _directOnly = directOnly;
     }
 
     private static HttpClient CreateClient(HttpMessageHandler handler)
@@ -76,7 +78,10 @@ public sealed class GitHubConfigService : IDisposable
             // A stale system proxy must not hold up a working direct route.
             using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             attemptCts.CancelAfter(_attemptTimeout);
-            var pending = new[] { (Client: _systemProxyClient, Direct: false), (Client: _directClient, Direct: true) }
+            var modes = _directOnly
+                ? new[] { (Client: _directClient, Direct: true) }
+                : new[] { (Client: _systemProxyClient, Direct: false), (Client: _directClient, Direct: true) };
+            var pending = modes
                 .Select(mode => FetchOneAsync(mode.Client, candidate,
                     string.Equals(candidate, requestedUrl, StringComparison.OrdinalIgnoreCase) ? previousETag : null,
                     mode.Direct, attemptCts.Token)).ToList();

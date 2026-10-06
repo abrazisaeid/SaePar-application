@@ -1,5 +1,45 @@
 # Android connection recovery (2.0.24)
 
+## Optional discovery during a connection (2.0.31)
+
+After a new connection passes actual VPN validation, Android offers to continue
+discovery until there are **10 total** recently verified configurations. Declining
+starts no discovery. A stale answer after disconnect/reconnect is discarded.
+Existing successes from the last 30 minutes count; historical successes, endpoint
+checks and duplicate IDs do not. The active configuration is never retested or
+replaced. Ten saved configurations now fit in both the home list and fast cache.
+
+The user can stop discovery separately or disconnect immediately from the page
+or VPN notification. Disconnect cancels discovery. One scan has a three-minute
+budget and retains each success as it arrives. It tries archive candidates first
+and updated subscriptions once if the archive is exhausted. It can finish with
+fewer than ten if the network or available configurations do not provide ten.
+
+`AndroidDirectNetwork` selects an Internet/NotVpn network for the search. Managed
+DNS uses `Network.getAllByName`; each HTTP/precheck socket is bound explicitly
+before connecting. The duplicate descriptor is closed without closing the managed
+socket. HTTP connection pooling cannot carry subsequent searches to an old network,
+and Android downloads only one direct copy rather than racing identical routes.
+At most four endpoint checks/DNS lookups run concurrently; native probes remain
+serial. A cancelled DNS caller does not release its concurrency slot until the
+actual Android lookup finishes.
+
+The private `:probe` process receives the same Parcelable Network. Only that process
+uses `bindProcessToNetwork`; the Java dialer controller also explicitly binds Go
+socket descriptors, including bootstrap DNS, to the physical network. A failed
+binding or vanished search network stops the run without marking configurations
+dead. The main application stays on the VPN so connection validation and the
+connected-server ping still exercise the real TUN. No app-wide bypass is installed.
+
+`scripts/build-android-bridge.ps1` rebuilds the small checked-in Java shim using
+the pinned official libXray AAR. Tests cover topping up five to ten, excluding the
+active server, freshness/duplicate counting, transport failure propagation,
+loopback stream ownership and restoring all ten saved configurations.
+
+References: [Android Network socket binding and DNS](https://developer.android.com/reference/android/net/Network),
+[process binding](https://developer.android.com/reference/android/net/ConnectivityManager#bindProcessToNetwork(android.net.Network)),
+and [libXray controller error handling](https://github.com/XTLS/libXray/blob/v26.7.28/controller/controller.go).
+
 ## Live VPN notification (2.0.30)
 
 Android's foreground notification shows connection/startup/validation/shutdown

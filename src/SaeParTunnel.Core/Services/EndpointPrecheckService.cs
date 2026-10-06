@@ -2,11 +2,14 @@ using System.Diagnostics;
 using System.Net.Sockets;
 using System.Collections.Concurrent;
 using SaeParTunnel.Core.Models;
+using SaeParTunnel.Core.Abstractions;
 
 namespace SaeParTunnel.Core.Services;
 
 public sealed class EndpointPrecheckService
 {
+    private readonly IEndpointConnector? _connector;
+    public EndpointPrecheckService(IEndpointConnector? connector = null) => _connector = connector;
     private sealed record Entry(DateTime Created, Lazy<Task<TestResult>> Result);
     private static readonly AsyncLocal<ConcurrentDictionary<string, Entry>?> Batch = new();
 
@@ -37,7 +40,7 @@ public sealed class EndpointPrecheckService
         return entry.Result.Value.WaitAsync(cancellationToken);
     }
 
-    private static async Task<TestResult> TestEndpointAsync(ConfigProfile profile, TimeSpan timeout, CancellationToken cancellationToken)
+    private async Task<TestResult> TestEndpointAsync(ConfigProfile profile, TimeSpan timeout, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(profile.Address) || profile.Port is < 1 or > 65535)
@@ -46,13 +49,20 @@ public sealed class EndpointPrecheckService
         if (string.Equals(profile.Network, "mkcp", StringComparison.OrdinalIgnoreCase))
             return new TestResult(false, null, "برای mKCP تست TCP معیار مناسبی نیست.", ValidationLevel.EndpointOnly);
 
-        using var tcp = new TcpClient();
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(timeout);
         try
         {
             var sw = Stopwatch.StartNew();
-            await tcp.ConnectAsync(profile.Address, profile.Port, timeoutCts.Token);
+            if (_connector is not null)
+            {
+                using var stream = await _connector.ConnectAsync(profile.Address, profile.Port, timeoutCts.Token);
+            }
+            else
+            {
+                using var tcp = new TcpClient();
+                await tcp.ConnectAsync(profile.Address, profile.Port, timeoutCts.Token);
+            }
             sw.Stop();
             return new TestResult(true, (int)sw.ElapsedMilliseconds, "Endpoint TCP قابل دسترس است.", ValidationLevel.EndpointOnly);
         }
@@ -61,6 +71,8 @@ public sealed class EndpointPrecheckService
             return new TestResult(false, null, $"TCP timeout بعد از {timeout.TotalSeconds:0.#} ثانیه.", ValidationLevel.EndpointOnly);
         }
         catch (OperationCanceledException) { throw; }
+        // A missing physical network is infrastructure failure, not a dead server.
+        catch (TunnelStartupException) { throw; }
         catch (Exception ex)
         {
             cancellationToken.ThrowIfCancellationRequested();

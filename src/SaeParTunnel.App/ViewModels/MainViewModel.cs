@@ -52,6 +52,8 @@ public sealed class MainViewModel : ObservableObject
     private TaskCompletionSource? _discoveryCompletion;
     private bool _isTesting;
     private bool _findingServers;
+    private bool _connectedSearch;
+    private long _connectionGeneration;
     private bool _homeSearchCompleted;
     private CancellationTokenSource? _discoveryCts;
     private string _homeNotice = "";
@@ -129,7 +131,7 @@ public sealed class MainViewModel : ObservableObject
         CancelTestCommand = new Command(CancelTest);
         ConnectCommand = new Command(async () => await ConnectFromHomeAsync(), () => CanConnectHome);
         ConnectBestCommand = new Command(async () => await RunSafeAsync(ConnectBestAsync), () => CanStartConnection);
-        DisconnectCommand = new Command(async () => await RunSafeAsync(DisconnectAsync), () => CanStopConnection);
+        DisconnectCommand = new Command(async () => await DisconnectFromHomeAsync(), () => CanStopConnection);
         SaveSettingsCommand = new Command(async () => await RunSafeAsync(SaveSettingsAsync));
         BrowseXrayCommand = new Command(async () => await RunSafeAsync(BrowseXrayAsync));
         AddWebsiteCommand = new Command(AddWebsite);
@@ -313,14 +315,17 @@ public sealed class MainViewModel : ObservableObject
         (IsNotBusy || IsTesting || _findingServers) && SelectedHealthyProfile is not null && CanTunnel;
     public string SearchServersLabel => HasHomeServers ? "جست‌وجوی دوبارهٔ سرورها" : "پیدا کردن سرور";
     public string HomeConnectionTitle => IsConnectionBusy ? ConnectionBadgeText : IsConnected ? "متصل هستی" : "آمادهٔ اتصال";
-    public string HomeSearchProgress => $"{ProgressDone:N0} بررسی شد · {ProgressFullWorking:N0} سرور سالم";
+    public string HomeSearchProgress => _connectedSearch
+        ? $"{ProgressFullWorking:N0} از ۱۰ سرور آماده · {ProgressDone:N0} بررسی شد"
+        : $"{ProgressDone:N0} بررسی شد · {ProgressFullWorking:N0} سرور سالم";
     public string HomeHint => !CanTunnel ? "اتصال روی این دستگاه پشتیبانی نمی‌شود."
         : _isPinging ? "در حال گرفتن پینگ همین سرور…"
         : _waitingForTests ? "در حال پایان‌دادن به تست برای اتصال…"
         : _isLoadingHome ? "در حال بازیابی سرورهای ذخیره‌شده…"
+        : _connectedSearch ? "VPN متصل است؛ در حال پیدا کردن سرورهای جایگزین…"
         : _findingServers ? (IsTesting ? "در حال بررسی سرورها؛ کمی صبر کن." : "در حال دریافت سرورها…")
         : IsConnectionBusy ? "چند لحظه صبر کن…"
-        : IsConnected ? "برای پایان، قطع اتصال را بزن."
+        : IsConnected ? (_homeNotice.Length > 0 ? _homeNotice : "برای پایان، قطع اتصال را بزن.")
         : _homeNotice.Length > 0 ? _homeNotice
         : HasHomeServers ? "سرور را انتخاب کن و اتصال را بزن."
         : _homeSearchCompleted ? "سرور سالمی پیدا نشد. اینترنت را بررسی کن و دوباره جست‌وجو کن."
@@ -509,7 +514,7 @@ public sealed class MainViewModel : ObservableObject
     public bool ShowDisconnectAction => IsConnected;
     public bool ShowConnectionTools => !IsConnected && !IsConnectionBusy;
     public bool CanStartConnection => !_isInitializing && IsNotBusy && !IsConnected && !IsConnectionBusy;
-    public bool CanStopConnection => !_isInitializing && IsNotBusy && IsConnected && !IsConnectionBusy;
+    public bool CanStopConnection => !_isInitializing && (IsNotBusy || _connectedSearch) && IsConnected && !IsConnectionBusy;
     public string ConnectionBadgeText => _connectionUiPhase switch
         {
             ConnectionUiPhase.Connecting => "در حال اتصال",
@@ -524,6 +529,8 @@ public sealed class MainViewModel : ObservableObject
         private set
         {
             if (!SetProperty(ref _isConnected, value)) return;
+            _connectionGeneration++;
+            if (!value && _connectedSearch) CancelTest();
             RefreshConnectionActions();
         }
     }
@@ -1522,12 +1529,13 @@ public sealed class MainViewModel : ObservableObject
 
     private Task TestFilteredAsync() => TestProfilesAsync(_filteredSnapshot.ToList(), guidedHealthySearch: true);
 
-    private async Task TestProfilesAsync(IReadOnlyList<ConfigProfile> candidates, bool guidedHealthySearch = false, bool simpleSearch = false)
+    private async Task TestProfilesAsync(IReadOnlyList<ConfigProfile> candidates, bool guidedHealthySearch = false, bool simpleSearch = false,
+        bool connectedDiscovery = false, int alreadyReady = 0)
     {
         if (IsBusy || IsTesting) return;
         if (guidedHealthySearch)
             candidates = ConfigTestPlanner.OrderForHealthySearch(candidates);
-        if (!guidedHealthySearch || (candidates.Count <= 5 && !simpleSearch))
+        if (!guidedHealthySearch || (candidates.Count <= 5 && !simpleSearch && !connectedDiscovery))
         {
             TestGoalMessage = "تست این لیست تا پایان اجرا می‌شود.";
             ProgressFullWorking = 0;
@@ -1537,9 +1545,8 @@ public sealed class MainViewModel : ObservableObject
 
         if (candidates.Count == 0) { StatusMessage = "کانفیگی برای تست وجود ندارد."; return; }
 #if ANDROID
-        // libXray keeps several networking managers process-wide. Avoid starting a
-        // temporary test core on top of the active Android VPN core.
-        if (_tunnel.IsConnected)
+        // Connected discovery uses :probe and explicitly bound physical sockets.
+        if (_tunnel.IsConnected && !connectedDiscovery)
         {
             StatusMessage = "برای تست کانفیگ‌ها در Android ابتدا VPN را قطع کن؛ اتصال فعال دست‌نخورده باقی ماند.";
             if (Shell.Current is not null)
@@ -1550,15 +1557,19 @@ public sealed class MainViewModel : ObservableObject
         _testCts?.Cancel(); _testCts?.Dispose();
         var testCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _testCompletion = testCompletion;
-        _testCts = CancellationTokenSource.CreateLinkedTokenSource(simpleSearch ? _discoveryCts?.Token ?? CancellationToken.None : CancellationToken.None);
+        _testCts = CancellationTokenSource.CreateLinkedTokenSource(simpleSearch || connectedDiscovery ? _discoveryCts?.Token ?? CancellationToken.None : CancellationToken.None);
         var ct = _testCts.Token;
-        IsBusy = true; IsTesting = true; ProgressTotal = candidates.Count; ProgressDone = 0; ProgressWorking = 0; ProgressFailed = 0; ProgressFullWorking = 0;
-        TestGoalMessage = simpleSearch ? "در حال پیدا کردن ۵ سرور سالم" : "هدف فعلی: پیدا کردن ۵ کانفیگ سالم؛ بعد از آن از شما می‌پرسم ادامه بدهم یا نه.";
-        _healthySearchTarget = SimpleSearchHealthyTarget;
+        var initialTarget = connectedDiscovery ? ConnectedDiscoveryPolicy.HealthyTarget : SimpleSearchHealthyTarget;
+        IsBusy = true; IsTesting = true; ProgressTotal = candidates.Count; ProgressDone = 0; ProgressWorking = 0; ProgressFailed = 0; ProgressFullWorking = alreadyReady;
+        TestGoalMessage = connectedDiscovery ? "در حال تکمیل ۱۰ سرور سالم؛ اتصال فعلی فعال می‌ماند."
+            : simpleSearch ? "در حال پیدا کردن ۵ سرور سالم" : "هدف فعلی: پیدا کردن ۵ کانفیگ سالم؛ بعد از آن از شما می‌پرسم ادامه بدهم یا نه.";
+        _healthySearchTarget = initialTarget;
         var sw = Stopwatch.StartNew();
         UpdateProgress(sw, 0);
         var tested = 0; var concurrency = Math.Min(Math.Clamp(Settings.TestConcurrency, 1, 64), candidates.Count);
-        IReadOnlyList<ConfigProfile> remaining = candidates; int? healthyTarget = SimpleSearchHealthyTarget; var stoppedAfterEnough = false;
+        // Keep endpoint checks bounded while serializing native probes in :probe.
+        if (connectedDiscovery) concurrency = Math.Min(concurrency, 4);
+        IReadOnlyList<ConfigProfile> remaining = candidates; int? healthyTarget = initialTarget; var stoppedAfterEnough = false;
         StatusMessage = $"در حال پیدا کردن {healthyTarget} سرور سالم از بین {candidates.Count:N0} مورد...";
 
         async Task TestSkippedAsync()
@@ -1638,7 +1649,7 @@ public sealed class MainViewModel : ObservableObject
                 RefreshStats();
                 if (healthyTarget is null || ProgressFullWorking < healthyTarget.Value) continue;
 
-                if (simpleSearch)
+                if (simpleSearch || connectedDiscovery)
                 {
                     stoppedAfterEnough = true;
                     break;
@@ -1696,6 +1707,7 @@ public sealed class MainViewModel : ObservableObject
             IsTesting = false; IsBusy = false;
             StatusMessage = ct.IsCancellationRequested
                 ? $"تست متوقف شد؛ {ProgressDone}/{ProgressTotal} بررسی شد."
+                : connectedDiscovery ? $"جست‌وجوی سرور جایگزین تمام شد؛ {ProgressFullWorking:N0} سرور آماده داریم."
                 : simpleSearch
                     ? $"جست‌وجو تمام شد؛ {ProgressFullWorking:N0} سرور سالم پیدا شد."
                 : stoppedAfterEnough
@@ -1956,6 +1968,7 @@ public sealed class MainViewModel : ObservableObject
         attempts = attempts.Take(maxAttempts).ToList();
         var failures = new List<string>();
         var startupFailed = false;
+        var connectedSuccessfully = false;
 
         _homeNotice = "";
         IsBusy = true;
@@ -2010,6 +2023,7 @@ public sealed class MainViewModel : ObservableObject
                         RefreshFilters();
                         RefreshStats();
                         RefreshDiagnosticsReport();
+                        connectedSuccessfully = true;
                         return;
                     }
 
@@ -2058,6 +2072,111 @@ public sealed class MainViewModel : ObservableObject
         {
             SetConnectionUiPhase(ConnectionUiPhase.Idle);
             IsBusy = false;
+            if (connectedSuccessfully) await OfferConnectedDiscoveryAsync();
+        }
+    }
+
+    private async Task OfferConnectedDiscoveryAsync()
+    {
+        // Android has explicit physical-network isolation. Other platforms keep
+        // their existing discovery behavior until they have an equivalent path.
+#if ANDROID
+        var generation = _connectionGeneration;
+        if (!IsConnected || Shell.Current is null || IsBusy || _findingServers ||
+            ConnectedDiscoveryPolicy.CountReady(Profiles, DateTime.Now) >= ConnectedDiscoveryPolicy.HealthyTarget) return;
+        try
+        {
+            var accepted = await Shell.Current.DisplayAlert("سرور جایگزین پیدا کنم؟",
+                "اتصال برقرار شد. جست‌وجو را از اینترنت مستقیم گوشی ادامه بدهم تا در مجموع ۱۰ سرور سالم داشته باشی؟ تا ۳ دقیقه جست‌وجو می‌کنیم و هر وقت خواستی می‌توانی متوقفش کنی.",
+                "بله، ادامه بده", "فعلاً نه");
+            if (!accepted || !IsConnected || generation != _connectionGeneration || IsBusy || _findingServers) return;
+            await FindConnectedServersAsync(generation);
+        }
+        catch (Exception ex)
+        {
+            _homeNotice = HumanizeException(ex);
+            StatusMessage = _homeNotice;
+            NotifyHomeChanged();
+        }
+#endif
+    }
+
+#if ANDROID
+    private async Task FindConnectedServersAsync(long generation)
+    {
+        using var network = AndroidDirectNetwork.BeginScope();
+        using var discovery = new CancellationTokenSource(ConnectedDiscoveryPolicy.Budget);
+        _discoveryCts = discovery;
+        _discoveryCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _connectedSearch = true;
+        _findingServers = true;
+        RefreshConnectionActions();
+        try
+        {
+            var now = DateTime.Now;
+            var ready = ConnectedDiscoveryPolicy.CountReady(Profiles, now);
+            if (ready >= ConnectedDiscoveryPolicy.HealthyTarget) return;
+            // Test the existing archive first. Fetch only when it has no candidates;
+            // a large subscription download should not delay saved candidates.
+            var candidates = ConnectedDiscoveryPolicy.Candidates(Profiles, _activeProfileId, now);
+            if (candidates.Count == 0)
+            {
+                await GetConfigAsync(discovery.Token);
+                now = DateTime.Now;
+                ready = ConnectedDiscoveryPolicy.CountReady(Profiles, now);
+                candidates = ConnectedDiscoveryPolicy.Candidates(Profiles, _activeProfileId, now);
+            }
+            discovery.Token.ThrowIfCancellationRequested();
+            if (!IsConnected || generation != _connectionGeneration) return;
+            await TestProfilesAsync(candidates, guidedHealthySearch: true, connectedDiscovery: true, alreadyReady: ready);
+            // If the archive was exhausted, try updated subscriptions once. Do
+            // not retest the same failed configurations again in this search.
+            if (!discovery.IsCancellationRequested && IsConnected && generation == _connectionGeneration &&
+                ConnectedDiscoveryPolicy.CountReady(Profiles, DateTime.Now) < ConnectedDiscoveryPolicy.HealthyTarget)
+            {
+                var attempted = candidates.Select(profile => profile.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                await GetConfigAsync(discovery.Token);
+                discovery.Token.ThrowIfCancellationRequested();
+                if (!IsConnected || generation != _connectionGeneration) return;
+                now = DateTime.Now;
+                candidates = ConnectedDiscoveryPolicy.Candidates(Profiles, _activeProfileId, now)
+                    .Where(profile => !attempted.Contains(profile.Id)).ToList();
+                if (candidates.Count > 0)
+                    await TestProfilesAsync(candidates, guidedHealthySearch: true, connectedDiscovery: true,
+                        alreadyReady: ConnectedDiscoveryPolicy.CountReady(Profiles, now));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "جست‌وجوی سرور جایگزین متوقف شد؛ سرورهای پیدا‌شده ذخیره شدند.";
+        }
+        finally
+        {
+            if (IsConnected)
+            {
+                var ready = ConnectedDiscoveryPolicy.CountReady(Profiles, DateTime.Now);
+                _homeNotice = ready >= ConnectedDiscoveryPolicy.HealthyTarget
+                    ? "۱۰ سرور سالم آماده و ذخیره شده‌اند. اتصال فعلی فعال است."
+                    : $"جست‌وجو پایان یافت؛ {ready:N0} سرور سالم ذخیره شد. اتصال فعلی فعال است.";
+            }
+            _discoveryCts = null;
+            _findingServers = false;
+            _connectedSearch = false;
+            _discoveryCompletion.TrySetResult();
+            RefreshConnectionActions();
+        }
+    }
+#endif
+
+    private async Task DisconnectFromHomeAsync()
+    {
+        if (!CanStopConnection) return;
+        if (_connectedSearch) CancelTest();
+        try { await DisconnectAsync(); }
+        catch (Exception ex)
+        {
+            StatusMessage = HumanizeException(ex);
+            if (Shell.Current is not null) await Shell.Current.DisplayAlert("قطع اتصال", StatusMessage, "باشه");
         }
     }
 
@@ -2491,7 +2610,7 @@ public sealed class MainViewModel : ObservableObject
             .ToList();
 
         HealthyProfiles.ReplaceRange(healthy);
-        var saved = SavedServerPolicy.ForHome(Profiles, selectedId, SimpleSearchHealthyTarget);
+        var saved = SavedServerPolicy.ForHome(Profiles, selectedId, ConnectedDiscoveryPolicy.HealthyTarget);
         HomeServers.ReplaceRange(saved.Select((profile, index) => new HomeServerViewModel(profile, index + 1)));
         _recommendedHealthyProfile = healthy.FirstOrDefault() ?? Profiles
             .Where(IsTrustedCommunityCandidate)
@@ -2565,7 +2684,7 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task RunSafeAsync(Func<Task> action)
     {
-        if (IsBusy || _isInitializing) return;
+        if (IsBusy || _isInitializing || _findingServers) return;
         try { await action(); }
         catch (OperationCanceledException)
         {
