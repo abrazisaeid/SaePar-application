@@ -162,7 +162,10 @@ public sealed class SqliteProfileStoreTests : IDisposable
         var legacyBytes = await File.ReadAllBytesAsync(json);
         var store = new MauiJsonStore(_root);
         await store.SaveSettingsAsync(new AppSettings
-        { SuppressedProfileIds = new() { [profiles[1].Id] = DateTime.Now.AddDays(2) } });
+        {
+            GitHubETag = "newer-than-backup", CommunityHealthETag = "also-newer",
+            SuppressedProfileIds = new() { [profiles[1].Id] = DateTime.Now.AddDays(2) }
+        });
         profiles[0].Remark = "newer home state";
         await store.SaveHomeServersAsync([profiles[0]]);
         await File.WriteAllBytesAsync(Database, [0x45, 0, 0, 123, 8, 8, 8, 8]);
@@ -172,6 +175,10 @@ public sealed class SqliteProfileStoreTests : IDisposable
         Assert.Contains(recovered, p => p.Port == 2001 && p.Remark == "newer home state");
         Assert.DoesNotContain(recovered, p => p.Port == 2002);
         Assert.Equal(legacyBytes, await File.ReadAllBytesAsync(json));
+        var settingsAfterRecovery = await new MauiJsonStore(_root).LoadSettingsAsync();
+        Assert.Empty(settingsAfterRecovery.GitHubETag);
+        Assert.Empty(settingsAfterRecovery.CommunityHealthETag);
+        Assert.All(settingsAfterRecovery.Subscriptions, source => Assert.Empty(source.ETag));
         await store.SaveProfilesAsync(recovered);
     }
 

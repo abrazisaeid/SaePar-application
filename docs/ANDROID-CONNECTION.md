@@ -28,6 +28,8 @@ the damaged database and sidecars without deleting them, then publish the new ba
 Old archive connectivity is reset for retesting; newer home state takes precedence.
 Recovery is announced on the home screen. Locks, future schemas, invalid rows and
 missing valid recovery sources retain the existing write-protection behavior.
+Recovery clears subscription/community validators so a stale HTTP 304 cannot
+prevent downloading configurations absent from the restored archive.
 
 ## Restart discovery while connected (2.0.33)
 

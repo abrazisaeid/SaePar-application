@@ -14,6 +14,7 @@ public sealed class MauiJsonStore
     private SqliteProfileStore? _profiles;
     private bool _archiveReadFailed;
     private Dictionary<string, DateTime> _suppressedIds = new();
+    private AppSettings? _loadedSettings;
     private SqliteProfileStore ProfileDatabase => _profiles ??= new SqliteProfileStore(Path.Combine(RootPath, "profiles.db"));
     public MauiJsonStore() { }
     internal MauiJsonStore(string rootPath) { _rootPath = rootPath; }
@@ -80,12 +81,14 @@ public sealed class MauiJsonStore
 #endif
         if (shouldSave)
             await SaveSettingsAsync(settings);
+        _loadedSettings = settings;
         return settings;
     }
 
     public Task SaveSettingsAsync(AppSettings settings)
     {
         _selectedServerId = settings.SelectedServerId;
+        _loadedSettings = settings;
         _suppressedIds = settings.SuppressedProfileIds;
         return WriteAsync(SettingsPath, settings);
     }
@@ -191,6 +194,16 @@ public sealed class MauiJsonStore
         foreach (var profile in home) AddRecovered(profile); // newest home state wins
         if (recovered.Count == 0) return false;
         await ProfileDatabase.RecoverAsync(recovered.Values.ToList());
+        if (_loadedSettings is { } settings)
+        {
+            // Validators may describe imports newer than this recovery copy.
+            // Force a fresh body instead of accepting 304 for missing profiles.
+            settings.GitHubETag = string.Empty;
+            settings.CommunityHealthETag = string.Empty;
+            foreach (var subscription in settings.Subscriptions) subscription.ETag = string.Empty;
+            try { await SaveSettingsAsync(settings); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
         RecoveryNotice = $"آرشیو از نسخهٔ پشتیبان بازیابی شد؛ {recovered.Count:N0} سرور برگشت. برای بررسی اتصال، جست‌وجو را بزن.";
         LastStorageError = string.Empty;
         return true;
