@@ -4,6 +4,21 @@ namespace SaeParTunnel.Core.Services;
 
 public static class SubscriptionCatalog
 {
+    public const int CurrentVersion = 1;
+    public static IReadOnlyList<SubscriptionSource> CreateAdditionalDefaults() => new List<SubscriptionSource>
+    {
+        new()
+        {
+            Id = "public-radikal-verified", Name = "Radikal",
+            Url = "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/configs.txt"
+        },
+        new()
+        {
+            Id = "public-nomorewalls", Name = "NoMoreWalls",
+            Url = "https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list_raw.txt"
+        }
+    };
+
     public static bool Normalize(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -26,6 +41,8 @@ public static class SubscriptionCatalog
         }
 
         candidates.Add(SubscriptionSource.CreateBuiltIn());
+        var seedDefaults = settings.SubscriptionCatalogVersion < CurrentVersion;
+        if (seedDefaults) candidates.AddRange(CreateAdditionalDefaults());
 
         var normalized = new List<SubscriptionSource>();
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -77,8 +94,9 @@ public static class SubscriptionCatalog
         normalized.Remove(builtIn);
         normalized.Insert(0, builtIn);
 
-        var changed = !AreEquivalent(original, normalized);
+        var changed = seedDefaults || !AreEquivalent(original, normalized);
         settings.Subscriptions = normalized;
+        settings.SubscriptionCatalogVersion = Math.Max(settings.SubscriptionCatalogVersion, CurrentVersion);
 
         if (!string.Equals(settings.GitHubSubscriptionUrl, builtIn.Url, StringComparison.Ordinal) ||
             !string.Equals(settings.GitHubETag, builtIn.ETag, StringComparison.Ordinal) ||

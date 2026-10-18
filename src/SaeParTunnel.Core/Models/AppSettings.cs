@@ -30,6 +30,7 @@ public sealed class AppSettings
     public List<string> WhitelistWebsites { get; set; } = new();
 
     public List<SubscriptionSource> Subscriptions { get; set; } = new();
+    public int SubscriptionCatalogVersion { get; set; }
 
     // Retained so settings from older releases can be migrated without data loss.
     public string GitHubSubscriptionUrl { get; set; } =
