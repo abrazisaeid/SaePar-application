@@ -245,6 +245,38 @@ public sealed class XrayConfigBuilderTests
         Assert.Throws<NotSupportedException>(() => _builder.BuildIosTun(profile, new AppSettings(), 17));
     }
 
+    [Theory]
+    [InlineData("windows")]
+    [InlineData("android-probe")]
+    [InlineData("android-tun")]
+    [InlineData("ios-probe")]
+    [InlineData("ios-tun")]
+    public void EchReachesTlsWithoutChangingXhttpOrFingerprint(string target)
+    {
+        var profile = VlessProfile(network: "xhttp", security: "tls");
+        profile.EchConfigList = "public.example+udp://127.0.0.1";
+        profile.Fingerprint = "unsafe";
+        profile.Alpn = "h2";
+        profile.Mode = "packet-up";
+        profile.Path = "/xh-test";
+        var settings = new AppSettings { EnableIranBypass = false };
+        var json = target switch
+        {
+            "android-probe" => _builder.BuildAndroidProbe(profile, 10810),
+            "android-tun" => _builder.BuildAndroidTun(profile, settings),
+            "ios-probe" => _builder.BuildIosProbe(profile, 10810),
+            "ios-tun" => _builder.BuildIosTun(profile, settings, 10),
+            _ => _builder.Build(profile, 10810, 10811)
+        };
+        using var doc = JsonDocument.Parse(json);
+        var stream = doc.RootElement.GetProperty("outbounds")[0].GetProperty("streamSettings");
+        Assert.Equal(profile.EchConfigList, stream.GetProperty("tlsSettings").GetProperty("echConfigList").GetString());
+        Assert.Equal("unsafe", stream.GetProperty("tlsSettings").GetProperty("fingerprint").GetString());
+        Assert.Equal("h2", stream.GetProperty("tlsSettings").GetProperty("alpn")[0].GetString());
+        Assert.Equal("packet-up", stream.GetProperty("xhttpSettings").GetProperty("mode").GetString());
+        Assert.Equal("/xh-test", stream.GetProperty("xhttpSettings").GetProperty("path").GetString());
+    }
+
     private JsonDocument Build(
         ConfigProfile profile,
         int socksPort = 10808,

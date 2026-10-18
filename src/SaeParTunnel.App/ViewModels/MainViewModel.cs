@@ -1095,6 +1095,9 @@ public sealed class MainViewModel : ObservableObject
         {
             if (Settings.SuppressedProfileIds.TryGetValue(profile.Id, out var until) && until > DateTime.UtcNow)
                 continue;
+            if (profile.EchConfigList.Length > 0 &&
+                Settings.SuppressedProfileIds.TryGetValue(ConfigParser.ComputeIdWithoutEch(profile), out var legacyUntil) &&
+                legacyUntil > DateTime.UtcNow) continue;
             profile.Source = $"Subscription: {item.Name}";
             if (existing.TryGetValue(profile.Id, out var old))
             {

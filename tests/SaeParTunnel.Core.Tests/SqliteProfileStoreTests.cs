@@ -211,4 +211,40 @@ public sealed class SqliteProfileStoreTests : IDisposable
         Assert.False(store.IsCorrupt);
         await Assert.ThrowsAsync<IOException>(() => store.RecoverAsync([Profile(2)]));
     }
+
+    [Fact]
+    public async Task LegacyEchProfileMigratesRowIdentitySelectionAndPingCheckpointTogether()
+    {
+        var parser = new ConfigParser();
+        var profile = parser.Parse("vless://11111111-1111-1111-1111-111111111111@127.0.0.1:443?security=tls&type=xhttp&ech=public.example%2Budp%3A%2F%2F127.0.0.1", "manual", out _)!;
+        profile.EchConfigList = ""; // what v2.0.35 stored
+        profile.Id = ConfigParser.ComputeIdWithoutEch(profile);
+        var legacyId = profile.Id;
+        profile.Health = ProfileHealth.Failed;
+        profile.FailureCount = 3;
+        profile.LastSuccessfulTest = DateTime.Now.AddDays(-1);
+        var store = new MauiJsonStore(_root);
+        await store.SaveSettingsAsync(new AppSettings { SelectedServerId = legacyId });
+        await new SqliteProfileStore(Database).SaveSnapshotAsync([profile]);
+        var restarted = new MauiJsonStore(_root);
+        var settings = await restarted.LoadSettingsAsync();
+        var repaired = Assert.Single(await restarted.LoadProfilesAsync());
+        Assert.NotEqual(legacyId, repaired.Id);
+        Assert.Equal("public.example+udp://127.0.0.1", repaired.EchConfigList);
+        Assert.Equal(repaired.Id, settings.SelectedServerId);
+        Assert.Equal(ProfileHealth.Untested, repaired.Health);
+        Assert.Equal(0, repaired.FailureCount);
+        Assert.Equal(profile.LastSuccessfulTest, repaired.LastSuccessfulTest);
+        repaired.Health = ProfileHealth.Working;
+        repaired.LatencyMs = 82;
+        await restarted.SaveProfileAsync(repaired, [repaired]);
+        var again = new MauiJsonStore(_root);
+        Assert.Equal(repaired.Id, (await again.LoadSettingsAsync()).SelectedServerId);
+        var saved = Assert.Single(await again.LoadProfilesAsync());
+        Assert.Equal(repaired.Id, saved.Id);
+        Assert.Equal(82, saved.LatencyMs);
+        Assert.Equal(repaired.EchConfigList, saved.EchConfigList);
+        Assert.Equal(ProfileHealth.Working, saved.Health);
+        Assert.Single((await new SqliteProfileStore(Database).LoadAsync())!);
+    }
 }

@@ -145,6 +145,7 @@ public sealed class MauiJsonStore
             try { previous = await Task.Run(() => _files.ReadAsync<List<ConfigProfile>>(ProfilesPath + ".bak")) ?? new(); }
             catch (IOException) { /* An optional old backup must not block a valid primary. */ }
         }
+        var migratedIds = new Dictionary<string, string>(StringComparer.Ordinal);
         var restored = await Task.Run(() =>
         {
             var history = previous.GroupBy(ConfigParser.ComputeId).ToDictionary(g => g.Key,
@@ -155,7 +156,9 @@ public sealed class MauiJsonStore
                 if (!profile.LastSuccessfulTest.HasValue) SavedServerPolicy.RememberSuccess(profile);
                 // Check stored fields without reparsing and rehashing every URI.
                 ConfigParser.ValidateCachedProfile(profile);
-                profile.Id = ConfigParser.ComputeId(profile);
+                var normalizedId = ConfigParser.ComputeId(profile);
+                if (profile.Id != normalizedId) migratedIds[profile.Id] = normalizedId;
+                profile.Id = normalizedId;
                 if (profile.Health == ProfileHealth.Testing)
                     profile.Health = ProfileHealth.Untested;
                 if (history.TryGetValue(profile.Id, out var prior)) SavedServerPolicy.RecoverHistory(profile, prior);
@@ -165,7 +168,21 @@ public sealed class MauiJsonStore
         });
         // Commit every migrated row and the migration marker together. Legacy
         // JSON and its backups remain untouched for manual recovery.
-        if (stored is null) await ProfileDatabase.SaveSnapshotAsync(restored);
+        if (stored is null || migratedIds.Count > 0) await ProfileDatabase.SaveSnapshotAsync(restored);
+        var selectionChanged = false;
+        if (_selectedServerId is not null && migratedIds.TryGetValue(_selectedServerId, out var selectedId))
+        {
+            _selectedServerId = selectedId;
+            selectionChanged = true;
+        }
+        if (_loadedSettings is { } settings && migratedIds.Count > 0)
+        {
+            if (selectionChanged) settings.SelectedServerId = _selectedServerId!;
+            foreach (var (oldId, newId) in migratedIds)
+                if (settings.SuppressedProfileIds.TryGetValue(oldId, out var until))
+                    settings.SuppressedProfileIds[newId] = until;
+            await SaveSettingsAsync(settings);
+        }
         try { await SaveHomeServersAsync(restored); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         return restored;
@@ -215,6 +232,9 @@ public sealed class MauiJsonStore
                 ConfigParser.ValidateCachedProfile(profile);
                 profile.Id = ConfigParser.ComputeId(profile);
                 if (_suppressedIds.TryGetValue(profile.Id, out var until) && until > DateTime.Now) return;
+                if (profile.EchConfigList.Length > 0 &&
+                    _suppressedIds.TryGetValue(ConfigParser.ComputeIdWithoutEch(profile), out var oldUntil) &&
+                    oldUntil > DateTime.Now) return;
                 recovered[profile.Id] = profile;
             }
             catch (Exception ex) when (ex is FormatException or ArgumentException or NullReferenceException)

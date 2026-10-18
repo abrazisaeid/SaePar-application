@@ -1,5 +1,25 @@
 # Android connection recovery (2.0.24)
 
+## Preserve ECH in TLS share links (2.0.36)
+
+An XHTTP/TLS share link that worked in another client included `ech=...`; the
+parser previously discarded that field, so generated probes and tunnels were
+not equivalent to the link. ECH is now stored and forwarded to
+`tlsSettings.echConfigList`, retaining the chosen fingerprint, ALPN, host, path
+and XHTTP mode. URI query values are decoded once, preserving encoded `+` and
+DNS resolver syntax. The pinned native core accepts this TLS field; see its
+[TLS contract](https://github.com/XTLS/Xray-core/blob/v26.7.28/infra/conf/transport_security.go)
+and [ECH handling](https://github.com/XTLS/Xray-core/blob/v26.7.28/transport/internet/tls/ech.go).
+
+Cached TLS URI profiles recover missing ECH from their original links. Prior
+Failed results for those incomplete configurations are reset to Untested for
+retesting, preserving successful history. An explicitly stored ECH setting is
+not overwritten. ECH affects identity; non-ECH identities remain byte-for-byte
+compatible. Changed archive keys are migrated in one snapshot before individual
+ping saves, with selection and cleanup suppression preserved. Legacy suppressed
+identities remain honored during subscription imports and corrupt-archive recovery.
+ECH is supported when parsing new VMess JSON links as well.
+
 ## Corrupt archive recovery and TUN descriptor lifetime (2.0.34)
 
 A phone archive reproduced SQLite error 26: the database header had been

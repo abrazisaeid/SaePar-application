@@ -484,6 +484,7 @@ public sealed class XrayConfigBuilder
                 serverName = FirstNonEmpty(profile.Sni, profile.Host, profile.Authority),
                 allowInsecure = profile.AllowInsecure,
                 fingerprint = NullIfEmpty(profile.Fingerprint),
+                echConfigList = NullIfEmpty(profile.EchConfigList),
                 alpn = ParseAlpn(profile.Alpn)
             };
         }

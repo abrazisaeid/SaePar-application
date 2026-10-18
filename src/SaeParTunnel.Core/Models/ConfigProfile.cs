@@ -41,6 +41,7 @@ public sealed class ConfigProfile : INotifyPropertyChanged
     public string HeaderType { get; set; } = "none";
     public string Mode { get; set; } = string.Empty;
     public string Alpn { get; set; } = string.Empty;
+    public string EchConfigList { get; set; } = string.Empty;
     public bool AllowInsecure { get; set; }
     public int AlterId { get; set; }
     public string Remark { get; set; } = string.Empty;

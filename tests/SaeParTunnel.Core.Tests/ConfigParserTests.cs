@@ -160,6 +160,71 @@ public sealed class ConfigParserTests
         Assert.False(string.IsNullOrWhiteSpace(error));
     }
 
+    [Fact]
+    public void ParseXhttpEchPreservesEncodedDnsSettingAndTransportOptions()
+    {
+        var profile = ParseOk("vless://11111111-1111-1111-1111-111111111111@127.0.0.1:443?encryption=none&security=tls&sni=edge.example.test&fp=unsafe&alpn=h2&ech=public.example%2Budp%3A%2F%2F127.0.0.1&type=xhttp&host=edge.example.test&path=%2Fxh-test&mode=packet-up#ECH");
+        Assert.Equal("public.example+udp://127.0.0.1", profile.EchConfigList);
+        Assert.Equal("xhttp", profile.Network);
+        Assert.Equal("packet-up", profile.Mode);
+        Assert.Equal("unsafe", profile.Fingerprint);
+        Assert.Equal("h2", profile.Alpn);
+        Assert.Equal("/xh-test", profile.Path);
+        Assert.Equal(ProfileHealth.Untested, profile.Health);
+    }
+
+    [Fact]
+    public void EchIsPartOfIdentityWhileEmptyEchKeepsLegacyId()
+    {
+        var profile = ParseOk("vless://11111111-1111-1111-1111-111111111111@example.com:443?security=tls");
+        var previousId = profile.Id;
+        Assert.Equal(previousId, ConfigParser.ComputeIdWithoutEch(profile));
+        profile.EchConfigList = "public.example+udp://127.0.0.1";
+        var echId = ConfigParser.ComputeId(profile);
+        Assert.NotEqual(previousId, echId);
+        Assert.Equal(previousId, ConfigParser.ComputeIdWithoutEch(profile));
+        profile.EchConfigList = "public.example+https://127.0.0.1/dns-query";
+        Assert.NotEqual(echId, ConfigParser.ComputeId(profile));
+    }
+
+    [Fact]
+    public void NonEchIdentityMatchesThePreviousPublishedContract()
+    {
+        var profile = new ConfigProfile
+        {
+            Protocol = ProxyProtocol.Vless, Address = "example.com", Port = 443,
+            UserId = "11111111-1111-1111-1111-111111111111"
+        };
+        Assert.Equal("ab69fc6adc7a247a933bc4413617127782b22a07ad2d93fadd2ce82c8c46f01e", ConfigParser.ComputeId(profile));
+    }
+
+    [Fact]
+    public void VmessJsonPreservesEch()
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            add = "127.0.0.1", port = 443, id = "11111111-1111-1111-1111-111111111111",
+            net = "xhttp", tls = "tls", ech = "public.example+udp://127.0.0.1"
+        });
+        Assert.Equal("public.example+udp://127.0.0.1", ParseOk("vmess://" + ToBase64Url(payload)).EchConfigList);
+    }
+
+    [Fact]
+    public void CachedEchRepairResetsAnOldFalseFailureWithoutOverwritingExplicitSettings()
+    {
+        var profile = ParseOk("vless://11111111-1111-1111-1111-111111111111@127.0.0.1:443?security=tls&type=xhttp&ech=public.example%2Budp%3A%2F%2F127.0.0.1");
+        profile.EchConfigList = "";
+        profile.Health = ProfileHealth.Failed;
+        profile.FailureCount = 3;
+        ConfigParser.ValidateCachedProfile(profile);
+        Assert.Equal("public.example+udp://127.0.0.1", profile.EchConfigList);
+        Assert.Equal(ProfileHealth.Untested, profile.Health);
+        Assert.Equal(0, profile.FailureCount);
+        profile.EchConfigList = "explicit-setting";
+        ConfigParser.ValidateCachedProfile(profile);
+        Assert.Equal("explicit-setting", profile.EchConfigList);
+    }
+
     private ConfigProfile ParseOk(string link)
     {
         var profile = _parser.Parse(link, "test-source", out var error);

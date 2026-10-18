@@ -122,6 +122,7 @@ public sealed class ConfigParser
             HeaderType = Get(query, "headerType", "none"),
             Mode = Get(query, "mode"),
             Alpn = Get(query, "alpn"),
+            EchConfigList = Get(query, "ech", Get(query, "echConfigList")),
             AllowInsecure = IsTrue(Get(query, "allowInsecure")) ||
                 IsTrue(Get(query, "insecure")) ||
                 IsTrue(Get(query, "skip-cert-verify")),
@@ -164,6 +165,7 @@ public sealed class ConfigParser
             HeaderType = S("type", "none"),
             Fingerprint = S("fp"),
             Alpn = S("alpn"),
+            EchConfigList = S("ech", S("echConfigList")),
             AllowInsecure = IsTrue(S("allowInsecure")) ||
                 IsTrue(S("insecure")) ||
                 IsTrue(S("skip-cert-verify")),
@@ -256,6 +258,23 @@ public sealed class ConfigParser
     {
         profile.Network = NormalizeNetwork(profile.Network);
         profile.Security = profile.Security.Trim().ToLowerInvariant();
+        // Older archives kept the original link but discarded its ECH setting.
+        // Repair only that missing field; the link remains the source of truth.
+        if (string.IsNullOrEmpty(profile.EchConfigList) && profile.Security == "tls" &&
+            (profile.OriginalUri.Contains("ech=", StringComparison.OrdinalIgnoreCase) ||
+             profile.OriginalUri.Contains("echConfigList=", StringComparison.OrdinalIgnoreCase)) &&
+            Uri.TryCreate(profile.OriginalUri, UriKind.Absolute, out var echUri))
+        {
+            var query = ParseQuery(echUri.Query);
+            profile.EchConfigList = Get(query, "ech", Get(query, "echConfigList"));
+            if (profile.EchConfigList.Length > 0 && profile.Health == ProfileHealth.Failed)
+            {
+                profile.Health = ProfileHealth.Untested;
+                profile.FailureCount = 0;
+                profile.LatencyMs = null;
+                profile.TestMessage = "تنظیم ECH از لینک اصلی بازیابی شد؛ دوباره تست کن.";
+            }
+        }
         if (profile.Protocol == ProxyProtocol.Shadowsocks)
         {
             var uri = profile.OriginalUri.Split('#')[0];
@@ -377,10 +396,13 @@ public sealed class ConfigParser
         var value => value
     };
 
-    public static string ComputeId(ConfigProfile profile)
+    public static string ComputeId(ConfigProfile profile) => ComputeIdCore(profile, includeEch: true);
+    public static string ComputeIdWithoutEch(ConfigProfile profile) => ComputeIdCore(profile, includeEch: false);
+
+    private static string ComputeIdCore(ConfigProfile profile, bool includeEch)
     {
         // JSON preserves field boundaries even when credentials contain '|'.
-        var canonical = JsonSerializer.Serialize(new object[] {
+        object[] fields = {
             profile.Protocol,
             profile.Address.ToLowerInvariant(),
             profile.Port,
@@ -403,7 +425,10 @@ public sealed class ConfigParser
             profile.Mode,
             profile.Alpn,
             profile.SpiderX,
-            profile.AlterId });
+            profile.AlterId };
+        // Preserve every pre-existing non-ECH ID, including cleanup tombstones.
+        if (includeEch && !string.IsNullOrEmpty(profile.EchConfigList)) fields = [.. fields, profile.EchConfigList];
+        var canonical = JsonSerializer.Serialize(fields);
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
