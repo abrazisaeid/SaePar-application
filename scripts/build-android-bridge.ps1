@@ -10,6 +10,7 @@ $work = Join-Path $root ('artifacts/bridge-build/' + [Guid]::NewGuid().ToString(
 $classes = Join-Path $work 'classes'
 New-Item -ItemType Directory -Path $classes -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $binding 'ReferenceSource/SaeParXrayBridge.java.txt') -Destination (Join-Path $work 'SaeParXrayBridge.java')
+Copy-Item -LiteralPath (Join-Path $binding 'ReferenceSource/SaeParTunDescriptor.java.txt') -Destination (Join-Path $work 'SaeParTunDescriptor.java')
 $runtime = [IO.Compression.ZipFile]::OpenRead((Join-Path $binding 'Libraries/libXray.aar'))
 try { [IO.Compression.ZipFileExtensions]::ExtractToFile($runtime.GetEntry('classes.jar'), (Join-Path $work 'libXray.jar')) }
 finally { $runtime.Dispose() }
@@ -17,7 +18,7 @@ $aarPath = Join-Path $binding 'Libraries/SaeParXrayBridge.aar'
 $old = [IO.Compression.ZipFile]::OpenRead($aarPath)
 try { [IO.Compression.ZipFileExtensions]::ExtractToFile($old.GetEntry('AndroidManifest.xml'), (Join-Path $work 'AndroidManifest.xml')) }
 finally { $old.Dispose() }
-& (Join-Path $JavaHome 'bin/javac.exe') --release 8 -cp ((Join-Path $AndroidSdk 'platforms/android-35/android.jar') + ';' + (Join-Path $work 'libXray.jar')) -d $classes (Join-Path $work 'SaeParXrayBridge.java')
+& (Join-Path $JavaHome 'bin/javac.exe') --release 8 -cp ((Join-Path $AndroidSdk 'platforms/android-35/android.jar') + ';' + (Join-Path $work 'libXray.jar')) -d $classes (Join-Path $work 'SaeParXrayBridge.java') (Join-Path $work 'SaeParTunDescriptor.java')
 if ($LASTEXITCODE -ne 0) { throw 'Bridge Java compilation failed.' }
 & (Join-Path $JavaHome 'bin/jar.exe') cf (Join-Path $work 'classes.jar') -C $classes .
 if ($LASTEXITCODE -ne 0) { throw 'Bridge JAR creation failed.' }

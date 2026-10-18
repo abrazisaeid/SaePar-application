@@ -840,6 +840,7 @@ public sealed class MainViewModel : ObservableObject
             try
             {
                 Profiles.ReplaceRange(await _store.LoadProfilesAsync());
+                if (_store.RecoveryNotice.Length > 0) _homeNotice = _store.RecoveryNotice;
             }
             catch { loadErrors.Add(_store.LastStorageError); }
             RefreshStats();
@@ -2778,6 +2779,8 @@ public sealed class MainViewModel : ObservableObject
     private static string HumanizeException(Exception ex)
     {
         var message = FlattenException(ex);
+        if (message.Contains("Restart SaePar to release retired VPN descriptors", StringComparison.Ordinal))
+            return "برای آزاد کردن رابط‌های قبلی VPN، برنامه را کامل ببند و دوباره باز کن.";
         // Keep the actual Android stage/error. Generic text previously hid Binder
         // and TUN failures behind an unrelated permission or bad-server message.
         if (ex is TunnelStartupException or TunnelValidationException)

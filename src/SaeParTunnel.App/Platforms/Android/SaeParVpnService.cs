@@ -248,7 +248,10 @@ public sealed class SaeParVpnService : VpnService
             // initialized earlier by a Full-Test. Using a fake reserved fd + dup2
             // proved unreliable on real Android devices and could leave every app
             // request stuck until timeout while Xray itself appeared to be running.
-            var tunFd = _vpnInterface.Fd;
+            // The bridge lends Xray a dedicated duplicate. On shutdown it is
+            // atomically redirected to /dev/null before the real TUN closes,
+            // so late native writes cannot hit a reused SQLite/file descriptor.
+            var tunFd = SaeParXrayBridge.CoreTunFd;
             var runtimeXrayJson = InjectTunFdIntoConfig(xrayJson, tunFd);
             AndroidVpnRuntime.ReportStatus(
                 "tun-fd",

@@ -13,10 +13,12 @@ public sealed class MauiJsonStore
     private readonly string? _rootPath;
     private SqliteProfileStore? _profiles;
     private bool _archiveReadFailed;
+    private Dictionary<string, DateTime> _suppressedIds = new();
     private SqliteProfileStore ProfileDatabase => _profiles ??= new SqliteProfileStore(Path.Combine(RootPath, "profiles.db"));
     public MauiJsonStore() { }
     internal MauiJsonStore(string rootPath) { _rootPath = rootPath; }
     public string LastStorageError { get; private set; } = string.Empty;
+    public string RecoveryNotice { get; private set; } = string.Empty;
 
     public string RootPath
     {
@@ -57,6 +59,7 @@ public sealed class MauiJsonStore
         settings.WhitelistWebsites ??= new List<string>();
         settings.DirectRoutingEntries ??= new List<string>();
         settings.SuppressedProfileIds ??= new Dictionary<string, DateTime>();
+        _suppressedIds = settings.SuppressedProfileIds;
         shouldSave |= SubscriptionCatalog.Normalize(settings);
         if (refreshValidators)
         {
@@ -83,6 +86,7 @@ public sealed class MauiJsonStore
     public Task SaveSettingsAsync(AppSettings settings)
     {
         _selectedServerId = settings.SelectedServerId;
+        _suppressedIds = settings.SuppressedProfileIds;
         return WriteAsync(SettingsPath, settings);
     }
 
@@ -119,7 +123,13 @@ public sealed class MauiJsonStore
 
     private async Task<List<ConfigProfile>> LoadProfilesCoreAsync()
     {
-        var stored = await ProfileDatabase.LoadAsync();
+        List<ConfigProfile>? stored;
+        try { stored = await ProfileDatabase.LoadAsync(); }
+        catch (Microsoft.Data.Sqlite.SqliteException) when (ProfileDatabase.IsCorrupt)
+        {
+            if (!await RecoverCorruptArchiveAsync()) throw;
+            stored = await ProfileDatabase.LoadAsync();
+        }
         var profiles = stored ?? await ReadAsync<List<ConfigProfile>>(ProfilesPath) ?? new();
         var previous = new List<ConfigProfile>();
         try { previous = await LoadHomeServersAsync(); }
@@ -156,6 +166,47 @@ public sealed class MauiJsonStore
         try { await SaveHomeServersAsync(restored); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         return restored;
+    }
+
+    private async Task<bool> RecoverCorruptArchiveAsync()
+    {
+        var backup = await ProfileDatabase.ReadRecoveryBackupAsync();
+        if (backup is not { Count: > 0 })
+        {
+            try { backup = await ReadAsync<List<ConfigProfile>>(ProfilesPath); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+        var home = new List<ConfigProfile>();
+        try { home = await LoadHomeServersAsync(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        var recovered = new Dictionary<string, ConfigProfile>(StringComparer.Ordinal);
+        // Older archive copies do not prove present connectivity. Keep their
+        // history, and let current physical-network tests establish health again.
+        foreach (var profile in backup ?? new())
+        {
+            SavedServerPolicy.RememberSuccess(profile);
+            if (profile.Health is ProfileHealth.Working or ProfileHealth.Testing) profile.Health = ProfileHealth.Untested;
+            AddRecovered(profile);
+        }
+        foreach (var profile in home) AddRecovered(profile); // newest home state wins
+        if (recovered.Count == 0) return false;
+        await ProfileDatabase.RecoverAsync(recovered.Values.ToList());
+        RecoveryNotice = $"آرشیو از نسخهٔ پشتیبان بازیابی شد؛ {recovered.Count:N0} سرور برگشت. برای بررسی اتصال، جست‌وجو را بزن.";
+        LastStorageError = string.Empty;
+        return true;
+
+        void AddRecovered(ConfigProfile profile)
+        {
+            try
+            {
+                ConfigParser.ValidateCachedProfile(profile);
+                profile.Id = ConfigParser.ComputeId(profile);
+                if (_suppressedIds.TryGetValue(profile.Id, out var until) && until > DateTime.Now) return;
+                recovered[profile.Id] = profile;
+            }
+            catch (Exception ex) when (ex is FormatException or ArgumentException or NullReferenceException)
+            { /* The untouched source and quarantined DB retain unreadable entries. */ }
+        }
     }
     public async Task SaveProfilesAsync(IEnumerable<ConfigProfile> profiles)
     {

@@ -1,0 +1,39 @@
+package com.saepar.tunnel.bridge;
+
+import android.os.ParcelFileDescriptor;
+import android.system.Os;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+
+/** Owns the descriptor borrowed by Xray's asynchronous netstack. */
+public final class SaeParTunDescriptor {
+    private static final ArrayList<ParcelFileDescriptor> RETIRED = new ArrayList<>();
+    private static final int MAX_RETIRED = 256;
+    private ParcelFileDescriptor descriptor;
+
+    public SaeParTunDescriptor(ParcelFileDescriptor original) throws IOException {
+        synchronized (RETIRED) {
+            if (RETIRED.size() >= MAX_RETIRED)
+                throw new IOException("Restart SaePar to release retired VPN descriptors.");
+            descriptor = ParcelFileDescriptor.dup(original.getFileDescriptor());
+        }
+    }
+
+    public synchronized int getFd() { return descriptor == null ? -1 : descriptor.getFd(); }
+    synchronized java.io.FileDescriptor borrow() { return descriptor.getFileDescriptor(); }
+
+    public synchronized void retire() throws Exception {
+        if (descriptor == null) return;
+        // Xray 26.7.28 does not join every UDP callback at stop. Closing its fd
+        // permits a late packet write to overwrite an unrelated file opened at
+        // that number (observed on profiles.db). Replace the live fd atomically
+        // with /dev/null and reserve the number until this process exits.
+        try (ParcelFileDescriptor sink = ParcelFileDescriptor.open(
+                new File("/dev/null"), ParcelFileDescriptor.MODE_READ_WRITE)) {
+            Os.dup2(sink.getFileDescriptor(), descriptor.getFd());
+        }
+        synchronized (RETIRED) { RETIRED.add(descriptor); }
+        descriptor = null;
+    }
+}

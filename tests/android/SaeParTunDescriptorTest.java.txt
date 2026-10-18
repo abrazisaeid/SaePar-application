@@ -1,0 +1,45 @@
+package com.saepar.tunnel.bridge;
+
+import android.os.ParcelFileDescriptor;
+import android.system.Os;
+import java.io.File;
+import java.io.FileDescriptor;
+import java.nio.file.Files;
+import java.util.Arrays;
+
+/** Local file-only regression; no VPN, sockets or remote configurations. */
+public final class SaeParTunDescriptorTest {
+    public static void main(String[] args) throws Exception {
+        File sentinel = new File(args[0]);
+        byte[] expected = new byte[] { 11, 22, 33, 44 };
+        try (ParcelFileDescriptor original = ParcelFileDescriptor.open(sentinel,
+                ParcelFileDescriptor.MODE_CREATE | ParcelFileDescriptor.MODE_TRUNCATE | ParcelFileDescriptor.MODE_READ_WRITE)) {
+            Os.write(original.getFileDescriptor(), expected, 0, expected.length);
+            SaeParTunDescriptor handle = new SaeParTunDescriptor(original);
+            int retiredFd = handle.getFd();
+            FileDescriptor borrowed = handle.borrow();
+            handle.retire();
+            handle.retire(); // idempotent; must not retire another descriptor
+            byte[] packet = new byte[] { 0x45, 0, 0, 123, 8, 8, 8, 8 };
+            for (int i = 0; i < 10000; i++) Os.write(borrowed, packet, 0, packet.length);
+            if (!Arrays.equals(expected, Files.readAllBytes(sentinel.toPath())))
+                throw new AssertionError("Late packet overwrote sentinel file");
+            for (int i = 0; i < 255; i++) {
+                SaeParTunDescriptor next = new SaeParTunDescriptor(original);
+                if (next.getFd() == retiredFd) throw new AssertionError("Retired fd number reused");
+                next.retire();
+            }
+            boolean refused = false;
+            try { new SaeParTunDescriptor(original); }
+            catch (java.io.IOException expectedLimit) { refused = true; }
+            if (!refused) throw new AssertionError("Retired fd budget exceeded");
+            Os.write(borrowed, packet, 0, packet.length);
+            if (!Arrays.equals(expected, Files.readAllBytes(sentinel.toPath())))
+                throw new AssertionError("Late write after descriptor churn overwrote file");
+            Os.write(original.getFileDescriptor(), expected, 0, expected.length);
+            if (Files.size(sentinel.toPath()) != 8) throw new AssertionError("Original descriptor ownership lost");
+        }
+        if (!sentinel.delete()) throw new AssertionError("Sentinel cleanup failed");
+        System.out.println("PASS: 10001 late writes discarded; 256 retired descriptors reserved; original ownership retained; capacity bounded.");
+    }
+}

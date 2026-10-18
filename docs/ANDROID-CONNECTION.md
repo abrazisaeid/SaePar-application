@@ -1,5 +1,34 @@
 # Android connection recovery (2.0.24)
 
+## Corrupt archive recovery and TUN descriptor lifetime (2.0.34)
+
+A phone archive reproduced SQLite error 26: the database header had been
+overwritten by an IPv4/UDP reply. The pinned Xray Android TUN borrows a raw fd;
+its stack close does not wait for every outstanding UDP callback. Releasing that
+number immediately can redirect a late packet write into a newly opened file.
+See the pinned [Android TUN](https://github.com/XTLS/Xray-core/blob/v26.7.28/proxy/tun/tun_android.go)
+and [stack shutdown](https://github.com/XTLS/Xray-core/blob/v26.7.28/proxy/tun/stack_gvisor.go).
+
+The bridge now lends Xray a separate duplicate. Before stopping Xray it atomically
+replaces that live descriptor with `/dev/null`, reserves its number for the
+process lifetime, and then lets the service close its independently owned TUN.
+Late native reads see EOF and late writes are discarded. Reservations are bounded
+at 256 per process; reaching the limit requires restarting the app before another
+connection. A delay followed by closing the fd would not provide this protection.
+The file-only Android regression exercises the production helper with late writes,
+descriptor churn, repeated retirement and the reservation limit. It uses no VPN.
+
+Successful archive loads and full saves maintain a consistent SQLite backup,
+at most once every five minutes per store, using SQLite's backup API rather than
+copying a live WAL database. Single-profile ping updates do not copy the archive.
+Only SQLite corruption codes 11/26 authorize automated recovery: prefer the valid
+database backup, otherwise use legacy JSON and the newest valid home snapshot.
+Cleanup suppressions are honored. Build and verify a replacement first, quarantine
+the damaged database and sidecars without deleting them, then publish the new bank.
+Old archive connectivity is reset for retesting; newer home state takes precedence.
+Recovery is announced on the home screen. Locks, future schemas, invalid rows and
+missing valid recovery sources retain the existing write-protection behavior.
+
 ## Restart discovery while connected (2.0.33)
 
 The Android home screen has a Find replacement server button below Disconnect

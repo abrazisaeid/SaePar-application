@@ -8,11 +8,13 @@ namespace SaeParTunnel.Core.Services;
 
 // Each row keeps the complete source-generated profile contract. A ping changes
 // one row; imports and cleanup reconcile a snapshot in a single transaction.
-public sealed class SqliteProfileStore(string path)
+public sealed class SqliteProfileStore(string path, bool maintainBackup = true)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Dictionary<string, string>? _saved;
     private bool _readFailed;
+    public bool IsCorrupt { get; private set; }
+    private DateTime _lastBackupUtc;
     private static string Fingerprint(string data) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(data)));
     private static Dictionary<string, string> Fingerprints(Dictionary<string, string> rows) =>
         rows.ToDictionary(row => row.Key, row => Fingerprint(row.Value), StringComparer.Ordinal);
@@ -61,20 +63,19 @@ public sealed class SqliteProfileStore(string path)
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
+            IsCorrupt = false;
             using var connection = Open();
             if (!IsReady(connection)) { _readFailed = false; return null; }
             var rows = ReadRows(connection);
-            var profiles = rows.Select(row =>
-            {
-                var profile = JsonSerializer.Deserialize(row.Value, StorageJsonContext.Default.ConfigProfile)
-                    ?? throw new IOException("رکورد سرور قابل خواندن نیست؛ داده‌ها حفظ شدند.");
-                if (profile.Id != row.Key) throw new IOException("شناسهٔ رکورد سرور با دادهٔ ذخیره‌شده سازگار نیست.");
-                return profile;
-            }).ToList();
+            var profiles = DeserializeRows(rows);
             _saved = Fingerprints(rows);
             _readFailed = false;
+            IsCorrupt = false;
+            BackupIfDue(connection);
             return profiles;
         }
+        catch (SqliteException ex) when (ex.SqliteErrorCode is 11 or 26)
+        { _readFailed = true; IsCorrupt = true; throw; }
         catch { _readFailed = true; throw; }
         finally { _gate.Release(); }
     });
@@ -119,10 +120,78 @@ public sealed class SqliteProfileStore(string path)
                 }
                 transaction.Commit();
                 _saved = next;
+                BackupIfDue(connection);
                 return changed;
             }
             finally { _gate.Release(); }
         });
+    }
+
+    private static List<ConfigProfile> DeserializeRows(Dictionary<string, string> rows) => rows.Select(row =>
+    {
+        var profile = JsonSerializer.Deserialize(row.Value, StorageJsonContext.Default.ConfigProfile)
+            ?? throw new IOException("رکورد سرور قابل خواندن نیست؛ داده‌ها حفظ شدند.");
+        if (profile.Id != row.Key) throw new IOException("شناسهٔ رکورد سرور با دادهٔ ذخیره‌شده سازگار نیست.");
+        return profile;
+    }).ToList();
+
+    private void BackupIfDue(SqliteConnection source)
+    {
+        if (!maintainBackup || DateTime.UtcNow - _lastBackupUtc < TimeSpan.FromMinutes(5)) return;
+        var temp = path + ".backup-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            using (var destination = new SqliteConnection($"Data Source={temp};Pooling=False"))
+            {
+                destination.Open();
+                source.BackupDatabase(destination);
+            }
+            File.Move(temp, path + ".bak", overwrite: true);
+            _lastBackupUtc = DateTime.UtcNow;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
+        { /* An unavailable optional backup cannot invalidate a committed archive. */ }
+        finally { try { File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    public Task<List<ConfigProfile>?> ReadRecoveryBackupAsync() => Task.Run(() =>
+    {
+        if (!File.Exists(path + ".bak")) return null;
+        try
+        {
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = path + ".bak", Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+            connection.Open();
+            return IsReady(connection) ? DeserializeRows(ReadRows(connection)) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException or JsonException)
+        { return null; }
+    });
+
+    // Only a proven corrupt SQLite file can enter this path. A lock, future
+    // schema or a malformed row never authorizes replacement of the archive.
+    public async Task RecoverAsync(IReadOnlyList<ConfigProfile> profiles)
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        var replacement = path + ".recovery-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            if (!IsCorrupt || !_readFailed || profiles.Count == 0)
+                throw new IOException("بازیابی فقط با نسخهٔ سالم و بانک آسیب‌دیده انجام می‌شود.");
+            var restored = new SqliteProfileStore(replacement, maintainBackup: false);
+            await restored.SaveSnapshotAsync(profiles).ConfigureAwait(false);
+            var checkedRows = await restored.LoadAsync().ConfigureAwait(false);
+            if (checkedRows?.Count != profiles.Count) throw new IOException("تأیید نسخهٔ بازیابی انجام نشد.");
+            var quarantine = path + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss") + "-" + Guid.NewGuid().ToString("N");
+            File.Move(path, quarantine);
+            foreach (var suffix in new[] { "-wal", "-shm" })
+                if (File.Exists(path + suffix)) File.Move(path + suffix, quarantine + suffix);
+            File.Move(replacement, path);
+            _saved = null;
+            _readFailed = false;
+            IsCorrupt = false;
+        }
+        finally { _gate.Release(); }
     }
 
     public Task SaveProfileAsync(ConfigProfile profile)

@@ -125,4 +125,83 @@ public sealed class SqliteProfileStoreTests : IDisposable
         Assert.Equal("{broken", await File.ReadAllTextAsync(json));
         Assert.Null(await new SqliteProfileStore(Database).LoadAsync());
     }
+
+    [Fact]
+    public async Task CorruptDatabaseRecoversFromConsistentBackupAndPreservesDamagedBytes()
+    {
+        var store = new MauiJsonStore(_root);
+        await store.SaveProfilesAsync([Profile(1), Profile(2), Profile(3)]);
+        Assert.True(File.Exists(Database + ".bak"));
+        File.Delete(Path.Combine(_root, "home-servers.json"));
+        var damaged = await File.ReadAllBytesAsync(Database);
+        // Reproduce the phone: an IPv4/UDP reply overwrote the SQLite header.
+        new byte[] { 0x45, 0, 0, 123, 0, 0, 0, 0, 64, 17, 164, 79, 8, 8, 8, 8 }.CopyTo(damaged, 0);
+        await File.WriteAllBytesAsync(Database, damaged);
+        var restarted = new MauiJsonStore(_root);
+        var recovered = await restarted.LoadProfilesAsync();
+        Assert.Equal(3, recovered.Count);
+        Assert.NotEmpty(restarted.RecoveryNotice);
+        Assert.All(recovered, p => Assert.Equal(ProfileHealth.Untested, p.Health));
+        var quarantine = Assert.Single(Directory.GetFiles(_root, "profiles.db.corrupt-*"));
+        Assert.Equal(damaged, await File.ReadAllBytesAsync(quarantine));
+        recovered.Add(Profile(4));
+        await restarted.SaveProfilesAsync(recovered);
+        var final = new MauiJsonStore(_root);
+        Assert.Equal(4, (await final.LoadProfilesAsync()).Count);
+        Assert.Empty(final.RecoveryNotice);
+    }
+
+    [Fact]
+    public async Task LegacyRecoveryKeepsNewestHomeStateAndRespectsCleanupSuppression()
+    {
+        Directory.CreateDirectory(_root);
+        var profiles = new List<ConfigProfile> { Profile(1), Profile(2), Profile(3) };
+        foreach (var profile in profiles) profile.Id = ConfigParser.ComputeId(profile);
+        var json = Path.Combine(_root, "profiles.json");
+        await new JsonCacheStore().WriteAsync(json, profiles);
+        var legacyBytes = await File.ReadAllBytesAsync(json);
+        var store = new MauiJsonStore(_root);
+        await store.SaveSettingsAsync(new AppSettings
+        { SuppressedProfileIds = new() { [profiles[1].Id] = DateTime.Now.AddDays(2) } });
+        profiles[0].Remark = "newer home state";
+        await store.SaveHomeServersAsync([profiles[0]]);
+        await File.WriteAllBytesAsync(Database, [0x45, 0, 0, 123, 8, 8, 8, 8]);
+        await store.LoadSettingsAsync();
+        var recovered = await store.LoadProfilesAsync();
+        Assert.Equal(2, recovered.Count);
+        Assert.Contains(recovered, p => p.Port == 2001 && p.Remark == "newer home state");
+        Assert.DoesNotContain(recovered, p => p.Port == 2002);
+        Assert.Equal(legacyBytes, await File.ReadAllBytesAsync(json));
+        await store.SaveProfilesAsync(recovered);
+    }
+
+    [Fact]
+    public async Task CorruptDatabaseWithoutRecoverySourceStaysBlockedAndUntouched()
+    {
+        Directory.CreateDirectory(_root);
+        byte[] damaged = [0x45, 0, 0, 123, 8, 8, 8, 8];
+        await File.WriteAllBytesAsync(Database, damaged);
+        var store = new MauiJsonStore(_root);
+        await Assert.ThrowsAsync<SqliteException>(() => store.LoadProfilesAsync());
+        await Assert.ThrowsAsync<IOException>(() => store.SaveProfilesAsync([Profile(1)]));
+        Assert.Equal(damaged, await File.ReadAllBytesAsync(Database));
+        Assert.Empty(Directory.GetFiles(_root, "profiles.db.corrupt-*"));
+    }
+
+    [Fact]
+    public async Task FutureSchemaCannotBeReplacedByRecoveryData()
+    {
+        var store = new SqliteProfileStore(Database);
+        await store.SaveSnapshotAsync([Profile(1)]);
+        using (var db = new SqliteConnection($"Data Source={Database};Pooling=False"))
+        {
+            db.Open();
+            using var command = db.CreateCommand();
+            command.CommandText = "UPDATE metadata SET value='999' WHERE key='profiles-schema'";
+            command.ExecuteNonQuery();
+        }
+        await Assert.ThrowsAsync<IOException>(() => store.LoadAsync());
+        Assert.False(store.IsCorrupt);
+        await Assert.ThrowsAsync<IOException>(() => store.RecoverAsync([Profile(2)]));
+    }
 }

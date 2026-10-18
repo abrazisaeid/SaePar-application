@@ -23,6 +23,7 @@ public final class SaeParXrayBridge {
     private static volatile Network probeNetwork;
     private static volatile boolean probeBindingFailed;
     private static boolean controllersRegistered;
+    private static SaeParTunDescriptor coreTun;
 
     private static final DialerController DIALER_CONTROLLER = new DialerController() {
         @Override
@@ -77,6 +78,7 @@ public final class SaeParXrayBridge {
         if (tunInterface == null) throw new IllegalArgumentException("TUN interface is null");
 
         synchronized (LOCK) {
+            if (coreTun != null) throw new IllegalStateException("Previous TUN is still attached");
             activeVpnService = service;
 
             if (!controllersRegistered) {
@@ -89,21 +91,33 @@ public final class SaeParXrayBridge {
             if (dnsServer != null && !dnsServer.trim().isEmpty()) {
                 LibXray.setDNS(DIALER_CONTROLLER, dnsServer.trim());
             }
+            coreTun = new SaeParTunDescriptor(tunInterface);
         }
     }
 
+    public static int getCoreTunFd() {
+        synchronized (LOCK) { return coreTun == null ? -1 : coreTun.getFd(); }
+    }
+
     /** Stop Xray, reset process DNS and detach the active VpnService. */
-    public static void detachTun() {
+    public static void detachTun() throws Exception {
         synchronized (LOCK) {
             try {
-                LibXray.invoke("{\"apiVersion\":1,\"method\":\"stopXray\"}");
-            } catch (Throwable ignored) {
+                if (coreTun != null) {
+                    coreTun.retire();
+                    coreTun = null;
+                }
+            } finally {
+                try {
+                    LibXray.invoke("{\"apiVersion\":1,\"method\":\"stopXray\"}");
+                } catch (Throwable ignored) {
+                }
+                try {
+                    LibXray.resetDNS();
+                } catch (Throwable ignored) {
+                }
+                activeVpnService = null;
             }
-            try {
-                LibXray.resetDNS();
-            } catch (Throwable ignored) {
-            }
-            activeVpnService = null;
         }
     }
 
