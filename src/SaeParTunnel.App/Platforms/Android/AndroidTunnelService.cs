@@ -95,7 +95,7 @@ public sealed class AndroidTunnelService : ITunnelService
                 return new TestResult(false, null,
                     "سرور فقط به یک سایت تست پاسخ داد و برای اینترنت پایدار تأیید نشد.", ValidationLevel.None);
             return new TestResult(true, Math.Max(first.LatencyMs ?? 0, second.LatencyMs ?? 0),
-                "دو مقصد خارجی از پروکسی پاسخ دادند.", ValidationLevel.FullProxy);
+                "دو مقصد پاسخ دادند و ۳۲ کیلوبایت از پروکسی دریافت شد.", ValidationLevel.FullProxy);
         }
         catch (System.OperationCanceledException) { throw; }
         catch (TunnelStartupException) { throw; }
@@ -116,20 +116,35 @@ public sealed class AndroidTunnelService : ITunnelService
         // through the proxy even when website whitelisting is enabled.
         using var handler = new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false };
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
-        foreach (var endpoint in new[] { "https://cp.cloudflare.com/generate_204", "https://www.gstatic.com/generate_204" })
+        try
         {
-            try
+            var watch = Stopwatch.StartNew();
+            using var response = await client.GetAsync("https://www.gstatic.com/generate_204",
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.NoContent)
+                return new TestResult(false, null, "بررسی اتصال فعال پاسخ ۲۰۴ نگرفت.", ValidationLevel.None);
+            using var download = await client.GetAsync("https://speed.cloudflare.com/__down?bytes=32768",
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (download.StatusCode != HttpStatusCode.OK)
+                return new TestResult(false, null, "اتصال فعال پاسخ دانلود معتبر نگرفت.", ValidationLevel.None);
+            await using var body = await download.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var buffer = new byte[8192];
+            var count = 0;
+            while (count < 32768)
             {
-                var watch = Stopwatch.StartNew();
-                using var response = await client.GetAsync(endpoint, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                var read = await body.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, 32768 - count)), cancellationToken)
                     .ConfigureAwait(false);
-                if (response.StatusCode == HttpStatusCode.NoContent)
-                    return new TestResult(true, (int)watch.ElapsedMilliseconds, "پاسخ اینترنت از اتصال فعال دریافت شد.", ValidationLevel.FullProxy);
+                if (read == 0)
+                    return new TestResult(false, null, "دانلود اتصال فعال پیش از دریافت ۳۲ کیلوبایت قطع شد.", ValidationLevel.None);
+                count += read;
             }
-            catch (System.OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (Exception ex) when (ex is HttpRequestException or System.OperationCanceledException) { }
+            return new TestResult(true, (int)watch.ElapsedMilliseconds, "پاسخ و ۳۲ کیلوبایت داده از اتصال فعال دریافت شد.", ValidationLevel.FullProxy);
         }
-        return new TestResult(false, null, "اتصال فعال به درخواست پینگ پاسخ نداد.", ValidationLevel.FullProxy);
+        catch (System.OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception ex) when (ex is HttpRequestException or System.OperationCanceledException or IOException)
+        {
+            return new TestResult(false, null, "اتصال فعال به درخواست یا دانلود پاسخ نداد.", ValidationLevel.None);
+        }
     }
 
     public async Task ConnectAsync(

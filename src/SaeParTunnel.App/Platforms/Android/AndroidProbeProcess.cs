@@ -7,6 +7,8 @@ using Microsoft.Maui.ApplicationModel;
 using SaeParTunnel.Core.Services;
 using SaeParTunnel.Core.Models;
 using System.Text.Json;
+using System.Diagnostics;
+using System.Net;
 using Process = Android.OS.Process;
 
 namespace SaeParTunnel.App.Platforms.Android;
@@ -281,12 +283,13 @@ public sealed class SaeParProbeService : Service
                     path = Path.Combine(cache, $"probe-{token}.json");
                     await File.WriteAllTextAsync(path, config).ConfigureAwait(false);
                     SaeParXrayBridge.Initialize();
-                    var request = JsonSerializer.Serialize(new
-                    {
-                        apiVersion = 1, method = "ping",
-                        payload = new { configPath = path, timeout = seconds, url, proxy = $"socks5://127.0.0.1:{port}" }
-                    });
-                    var response = SaeParXrayBridge.Invoke(request);
+                    var response = url == "https://www.gstatic.com/generate_204"
+                        ? await CheckRealTrafficAsync(config, port, seconds).ConfigureAwait(false)
+                        : SaeParXrayBridge.Invoke(JsonSerializer.Serialize(new
+                        {
+                            apiVersion = 1, method = "ping",
+                            payload = new { configPath = path, timeout = seconds, url, proxy = $"socks5://127.0.0.1:{port}" }
+                        }));
                     AndroidDirectNetwork.EnsureAvailable(network);
                     if (SaeParXrayBridge.ProbeBindingFailed)
                         throw new TunnelStartupException("Probe socket could not bind to the physical network.");
@@ -302,5 +305,59 @@ public sealed class SaeParProbeService : Service
             });
         }
     }
+
+    private static async Task<string> CheckRealTrafficAsync(string config, int port, int seconds)
+    {
+        var start = SaeParXrayBridge.Invoke(JsonSerializer.Serialize(new
+        {
+            apiVersion = 1, method = "runXrayFromJson", payload = new { configJSON = config }
+        }));
+        using (var document = JsonDocument.Parse(start))
+            if (!document.RootElement.GetProperty("success").GetBoolean()) return start;
+
+        try
+        {
+            using var handler = new SocketsHttpHandler
+            {
+                Proxy = new WebProxy($"socks5://127.0.0.1:{port}"),
+                UseProxy = true,
+                AllowAutoRedirect = false,
+                ConnectTimeout = TimeSpan.FromSeconds(seconds)
+            };
+            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(seconds) };
+            var watch = Stopwatch.StartNew();
+            using var check = await client.GetAsync("https://www.gstatic.com/generate_204",
+                HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+            if (check.StatusCode != HttpStatusCode.NoContent)
+                return ProbeFailure("Connectivity check did not return HTTP 204.");
+
+            using var download = await client.GetAsync("https://speed.cloudflare.com/__down?bytes=32768",
+                HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+            if (download.StatusCode != HttpStatusCode.OK)
+                return ProbeFailure("Download check did not return HTTP 200.");
+            await using var body = await download.Content.ReadAsStreamAsync().ConfigureAwait(false);
+            var buffer = new byte[8192];
+            var count = 0;
+            while (count < 32768)
+            {
+                var read = await body.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, 32768 - count)))
+                    .ConfigureAwait(false);
+                if (read == 0) return ProbeFailure("Download ended before 32 KiB.");
+                count += read;
+            }
+            return JsonSerializer.Serialize(new { success = true, data = new { delay = watch.ElapsedMilliseconds } });
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+        {
+            return ProbeFailure("GET or download through proxy failed.");
+        }
+        finally
+        {
+            SaeParXrayBridge.Invoke("{\"apiVersion\":1,\"method\":\"stopXray\"}");
+        }
+    }
+
+    private static string ProbeFailure(string reason) =>
+        JsonSerializer.Serialize(new { success = false, error = reason });
 }
 #endif

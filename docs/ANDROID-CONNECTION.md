@@ -1,5 +1,17 @@
 # Android connection recovery (2.0.24)
 
+## Verify response status and download bytes (2.0.44 preview)
+
+The 2.0.43 two-destination probe still marked a non-working server healthy.
+Pinned libXray 26.7.28 sends HEAD and accepts any HTTP status without reading
+the body, so two such probes cannot establish useful traffic. The second
+Android probe now starts the same isolated Xray configuration and makes a GET
+through its SOCKS inbound: Gstatic must return 204, then Cloudflare's speed
+endpoint must return 200 and at least 32 KiB. The dashboard ping on an active
+VPN now applies the same checks through the actual TUN. A failed active-TUN
+probe is no longer overwritten by an isolated proxy success. These checks
+reduce false positives but cannot guarantee sustained browsing.
+
 ## Require two foreign-site responses before marking Android servers healthy (2.0.43 preview)
 
 The currently selected public VMess server had a ping in SaePar but could not

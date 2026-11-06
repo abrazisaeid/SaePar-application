@@ -411,13 +411,6 @@ public sealed class MainViewModel : ObservableObject
                 ? await _tunnel.TestCurrentConnectionAsync(Settings, deadline.Token)
                 : await _tunnel.TestAsync(profile, Settings, deadline.Token);
             if (wasConnected && (!IsConnected || generation != _connectionGeneration)) return;
-            var activeTunnelFailed = wasConnected && !result.Success;
-#if ANDROID
-            // A failing TUN ping may be a phone/VPN issue. Confirm server failure
-            // using the isolated, physical-network probe before demoting it.
-            if (activeTunnelFailed)
-                result = await _tunnel.TestAsync(profile, Settings, deadline.Token);
-#endif
             deadline.Token.ThrowIfCancellationRequested();
             if (wasConnected && (!IsConnected || generation != _connectionGeneration)) return;
             profile.LatencyMs = result.Success ? result.LatencyMs : null;
@@ -435,9 +428,7 @@ public sealed class MainViewModel : ObservableObject
                 profile.Health = ProfileHealth.Failed;
             }
             var feedback = result.Success && result.LatencyMs.HasValue
-                ? activeTunnelFailed
-                    ? "اتصال فعال پاسخ نداد، اما خود سرور در تست مستقیم سالم بود."
-                    : "پینگ همین الان به‌روز شد."
+                ? "پینگ همین الان به‌روز شد."
                 : result.Success ? "سرور پاسخ داد."
                 : "سرور پاسخ نداد؛ از صفحهٔ اول کنار رفت و وارد فهرست بررسی و پاک‌سازی شد.";
             // Update the home list before persistence/cleanup, including selecting
@@ -2777,7 +2768,7 @@ public sealed class MainViewModel : ObservableObject
     private static string HumanizeTestResult(TestResult result) =>
         result.Success
             ? result.Level == ValidationLevel.FullProxy
-                ? "این سرور اینترنت را کامل از تونل عبور داد."
+                ? "این سرور آزمون دریافت داده از تونل را گذراند."
                 : "سرور پاسخ داد، اما عبور کامل اینترنت از تونل تأیید نشد."
             : HumanizeProblem(result.Message);
 
