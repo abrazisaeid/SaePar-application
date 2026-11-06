@@ -37,7 +37,12 @@ public sealed class IranRoutingTests
         Assert.True(Array.FindIndex(rules, r => Tag(r) == "iran-proxy-exceptions") < Array.FindIndex(rules, r => Tag(r) == "iran-domains"));
         Assert.Contains("domain:animelist.ir", Values(Find(rules, "iran-proxy-exceptions"), "domain"));
         Assert.Contains(Values(Find(rules, "iran-ip-ranges"), "ip"), ip => ip.Contains(':'));
-        Assert.Equal("private-networks", Tag(rules[1]));
+        var foreignIndex = Array.FindIndex(rules, r => Tag(r) == "foreign-domains");
+        var privateIndex = Array.FindIndex(rules, r => Tag(r) == "private-networks");
+        Assert.True(foreignIndex > Array.FindIndex(rules, r => Tag(r) == "iran-domains"));
+        Assert.True(privateIndex > foreignIndex);
+        Assert.Equal("proxy", rules[foreignIndex].GetProperty("outboundTag").GetString());
+        Assert.Contains("regexp:.+", Values(rules[foreignIndex], "domain"));
         Assert.False(root.TryGetProperty("dns", out _));
         Assert.DoesNotContain(rules, r => Tag(r) == "routing-dns-proxy");
     }
@@ -51,8 +56,10 @@ public sealed class IranRoutingTests
         using var doc = Build(platform, new AppSettings { EnableIranBypass = false, DirectRoutingEntries = new() { "example.com" } });
         Assert.Equal("proxy", doc.RootElement.GetProperty("outbounds")[0].GetProperty("tag").GetString());
         Assert.False(doc.RootElement.TryGetProperty("dns", out _));
-        var rules = doc.RootElement.GetProperty("routing").GetProperty("rules").EnumerateArray();
+        var rules = doc.RootElement.GetProperty("routing").GetProperty("rules").EnumerateArray().ToArray();
         Assert.DoesNotContain(rules, r => Tag(r).StartsWith("iran-") || Tag(r).StartsWith("custom-direct"));
+        Assert.True(Array.FindIndex(rules, r => Tag(r) == "foreign-domains") <
+            Array.FindIndex(rules, r => Tag(r) == "private-networks"));
     }
 
     [Fact]

@@ -1,5 +1,16 @@
 # Android connection recovery (2.0.24)
 
+## Prioritize sniffed foreign domains over poisoned private IPs (2.0.40 preview)
+
+Live phone logs showed foreign hostnames sniffed from TLS while their original
+destination was in 10/8. The early private-network rule sent these connections
+directly, where they timed out, although the VPN still appeared connected.
+Iran split routing now applies known domestic domain rules, then sends other
+sniffed hostnames through the proxy before checking literal private and Iranian
+IP destinations. Full-tunnel mode gets the same hostname-first rule, since
+disabling Iran bypass did not restore browsing on the phone. The previously
+installed connection monitor remains removed.
+
 ## Do not interrupt active VPN on validation failures (2.0.39 preview)
 
 Device logs from 2.0.38 showed Xray restarting about 66 seconds after a

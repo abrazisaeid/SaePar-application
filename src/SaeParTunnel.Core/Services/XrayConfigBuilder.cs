@@ -247,7 +247,7 @@ public sealed class XrayConfigBuilder
     {
         // Probe rules always validate the proxy, including when a user has added
         // a probe host to their direct list. Unknown/foreign traffic stays proxied.
-        var rules = new List<object> { BuildProbeRoutingRule(), BuildPrivateNetworkRule() };
+        var rules = new List<object> { BuildProbeRoutingRule() };
         if (settings.EnableIranBypass)
         {
             // Match known domains and literal destination IPs without resolving
@@ -262,6 +262,10 @@ public sealed class XrayConfigBuilder
             if (customIps.Length > 0) rules.Add(IpRule(customIps, "custom-direct-ips"));
             if (catalog.ProxyDomains.Length > 0) rules.Add(DomainRule(catalog.ProxyDomains, "proxy", "iran-proxy-exceptions"));
             rules.Add(DomainRule(catalog.DirectDomains, "direct", "iran-domains"));
+            // A DNS-poisoned foreign hostname may arrive at TUN with a 10/8
+            // destination. Prefer the sniffed hostname before private-IP rules.
+            rules.Add(BuildForeignHostnameRule());
+            rules.Add(BuildPrivateNetworkRule());
             rules.Add(IpRule(catalog.IpRanges, "iran-ip-ranges"));
         }
         else if (settings.EnableWhitelistRouting)
@@ -275,6 +279,12 @@ public sealed class XrayConfigBuilder
             var domains = settings.WhitelistWebsites.Select(NormalizeRoutingDomain).OfType<string>()
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (domains.Length > 0) rules.Add(DomainRule(domains, "proxy", whitelistRuleTag));
+            rules.Add(BuildPrivateNetworkRule());
+        }
+        else
+        {
+            rules.Add(BuildForeignHostnameRule());
+            rules.Add(BuildPrivateNetworkRule());
         }
         return new { domainStrategy = "AsIs", rules = rules.ToArray() };
     }
@@ -285,10 +295,13 @@ public sealed class XrayConfigBuilder
     private static object IpRule(string[] ips, string ruleTag) => new
     { type = "field", ip = ips, outboundTag = "direct", ruleTag };
 
+    private static object BuildForeignHostnameRule() =>
+        DomainRule(new[] { "regexp:.+" }, "proxy", "foreign-domains");
+
     private static object BuildPrivateNetworkRouting() => new
     {
         domainStrategy = "AsIs",
-        rules = new[] { BuildPrivateNetworkRule() }
+        rules = new[] { BuildForeignHostnameRule(), BuildPrivateNetworkRule() }
     };
 
     private static object BuildProbeRoutingRule() => new
