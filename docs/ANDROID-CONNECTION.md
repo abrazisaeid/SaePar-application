@@ -1,5 +1,14 @@
 # Android connection recovery (2.0.24)
 
+## Allow QUIC with Vision on Android TUN (2.0.41 preview)
+
+Phone logs from 2.0.40 confirmed domain routing and showed repeated
+`XTLS rejected UDP/443 traffic` for a VLESS Vision server while browsing
+remained stalled. Only the Android full-device TUN runtime now upgrades the
+outbound flow from `xtls-rprx-vision` to `xtls-rprx-vision-udp443`. The pinned
+Xray core strips the suffix from the server handshake and allows UDP/443;
+saved profiles and preconnection probes retain their original flow.
+
 ## Prioritize sniffed foreign domains over poisoned private IPs (2.0.40 preview)
 
 Live phone logs showed foreign hostnames sniffed from TLS while their original

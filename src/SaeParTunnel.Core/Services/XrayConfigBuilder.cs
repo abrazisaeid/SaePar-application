@@ -80,7 +80,8 @@ public sealed class XrayConfigBuilder
             settings,
             mtu,
             "saepar0",
-            "android-whitelist-websites");
+            "android-whitelist-websites",
+            allowVisionUdp443: true);
         return metricsPort == 0 ? json : XrayTrafficClient.EnableMetrics(json, metricsPort);
     }
 
@@ -114,7 +115,8 @@ public sealed class XrayConfigBuilder
         int mtu,
         string interfaceName,
         string whitelistRuleTag,
-        Dictionary<string, string>? environment = null)
+        Dictionary<string, string>? environment = null,
+        bool allowVisionUdp443 = false)
     {
         if (profile.Health == ProfileHealth.Unsupported)
             throw new NotSupportedException(profile.TestMessage);
@@ -139,12 +141,12 @@ public sealed class XrayConfigBuilder
             ? new object[]
             {
                 new { tag = "direct", protocol = "freedom", settings = new { } },
-                BuildProxyOutbound(profile),
+                BuildProxyOutbound(profile, allowVisionUdp443),
                 new { tag = "block", protocol = "blackhole", settings = new { } }
             }
             : new object[]
             {
-                BuildProxyOutbound(profile),
+                BuildProxyOutbound(profile, allowVisionUdp443),
                 new { tag = "direct", protocol = "freedom", settings = new { } },
                 new { tag = "block", protocol = "blackhole", settings = new { } }
             };
@@ -345,7 +347,7 @@ public sealed class XrayConfigBuilder
         return "domain:" + domain.TrimStart('.');
     }
 
-    private static Dictionary<string, object?> BuildProxyOutbound(ConfigProfile profile)
+    private static Dictionary<string, object?> BuildProxyOutbound(ConfigProfile profile, bool allowVisionUdp443 = false)
     {
         var outbound = new Dictionary<string, object?>
         {
@@ -358,7 +360,7 @@ public sealed class XrayConfigBuilder
                 ProxyProtocol.Shadowsocks => "shadowsocks",
                 _ => throw new NotSupportedException("پروتکل پشتیبانی نمی‌شود.")
             },
-            ["settings"] = BuildProtocolSettings(profile)
+            ["settings"] = BuildProtocolSettings(profile, allowVisionUdp443)
         };
 
         if (profile.Protocol != ProxyProtocol.Shadowsocks ||
@@ -371,7 +373,7 @@ public sealed class XrayConfigBuilder
         return outbound;
     }
 
-    private static object BuildProtocolSettings(ConfigProfile profile) => profile.Protocol switch
+    private static object BuildProtocolSettings(ConfigProfile profile, bool allowVisionUdp443 = false) => profile.Protocol switch
     {
         ProxyProtocol.Vless => new
         {
@@ -379,7 +381,8 @@ public sealed class XrayConfigBuilder
             port = profile.Port,
             id = profile.UserId,
             encryption = string.IsNullOrWhiteSpace(profile.Encryption) ? "none" : profile.Encryption,
-            flow = NullIfEmpty(profile.Flow),
+            flow = NullIfEmpty(allowVisionUdp443 && profile.Flow == "xtls-rprx-vision"
+                ? "xtls-rprx-vision-udp443" : profile.Flow),
             level = 0
         },
         ProxyProtocol.Vmess => new

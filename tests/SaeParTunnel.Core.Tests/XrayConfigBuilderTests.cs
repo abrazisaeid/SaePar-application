@@ -232,6 +232,21 @@ public sealed class XrayConfigBuilderTests
     }
 
     [Fact]
+    public void AndroidTunAllowsVisionUdp443WithoutChangingSavedProfileOrProbe()
+    {
+        var profile = VlessProfile(security: "tls");
+        profile.Flow = "xtls-rprx-vision";
+        var settings = new AppSettings();
+        using var android = JsonDocument.Parse(_builder.BuildAndroidTun(profile, settings));
+        using var probe = JsonDocument.Parse(_builder.BuildAndroidProbe(profile, 10810));
+        using var windows = Build(profile);
+        Assert.Equal("xtls-rprx-vision-udp443", android.RootElement.GetProperty("outbounds")[0].GetProperty("settings").GetProperty("flow").GetString());
+        Assert.Equal("xtls-rprx-vision", probe.RootElement.GetProperty("outbounds")[0].GetProperty("settings").GetProperty("flow").GetString());
+        Assert.Equal("xtls-rprx-vision", windows.RootElement.GetProperty("outbounds")[0].GetProperty("settings").GetProperty("flow").GetString());
+        Assert.Equal("xtls-rprx-vision", profile.Flow);
+    }
+
+    [Fact]
     public void BuildThrowsForUnsupportedProfile()
     {
         var profile = VlessProfile();
