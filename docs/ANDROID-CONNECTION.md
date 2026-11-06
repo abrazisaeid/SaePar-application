@@ -1,5 +1,20 @@
 # Android connection recovery (2.0.24)
 
+## Connection health recovery (2.0.37 preview)
+
+After the initial full-device HTTP validation succeeds, the Android foreground
+service checks the same VPN data path every 30 seconds. Two consecutive failed
+checks trigger one complete TUN/core rebuild using the selected configuration.
+The old borrowed descriptor is retired before the new TUN is established. If
+the rebuilt connection also loses its data path, the service stops and keeps a
+visible error in the app diagnostics instead of leaving a stale connected state.
+An increasing proxy downlink counter prevents a blocked validation endpoint
+from interrupting active application traffic. Disconnect cancels the monitor.
+
+This recovery behavior compiles and passes the local test suite, but a real
+Android phone has not yet been available over ADB for the reported one-minute
+stall. The underlying cause of the stall remains unconfirmed.
+
 ## Preserve ECH in TLS share links (2.0.36)
 
 An XHTTP/TLS share link that worked in another client included `ech=...`; the

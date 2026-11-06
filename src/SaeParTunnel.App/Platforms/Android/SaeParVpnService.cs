@@ -30,6 +30,7 @@ public sealed class SaeParVpnService : VpnService
     private const int NotificationId = 42017;
     private static readonly TimeSpan ValidationTcpTimeout = TimeSpan.FromMilliseconds(2500);
     private static readonly TimeSpan ValidationHttpTimeout = TimeSpan.FromMilliseconds(3500);
+    private static readonly TimeSpan HealthCheckInterval = TimeSpan.FromSeconds(30);
     private static readonly string[] ValidationEndpoints =
     {
         "https://cp.cloudflare.com/generate_204",
@@ -52,6 +53,7 @@ public sealed class SaeParVpnService : VpnService
     private int _disconnectRequested;
     private ParcelFileDescriptor? _vpnInterface;
     private bool _stopping;
+    private int _healthRestarts;
 
     public override void OnCreate()
     {
@@ -285,6 +287,7 @@ public sealed class SaeParVpnService : VpnService
                 AndroidVpnRuntime.SignalConnected(profileId);
                 UpdateNotification("متصل");
                 if (metricsPort != 0) StartTrafficUpdates(metricsPort);
+                _ = Task.Run(() => MonitorTunnelAsync(xrayJson, profileId, profileName, allowedPackages, metricsPort));
                 return;
             }
 
@@ -338,6 +341,67 @@ public sealed class SaeParVpnService : VpnService
         try { _vpnInterface?.Close(); } catch { }
         _vpnInterface?.Dispose();
         _vpnInterface = null;
+    }
+
+    private async Task MonitorTunnelAsync(string xrayJson, string profileId, string profileName,
+        string[] allowedPackages, int metricsPort)
+    {
+        var failures = 0;
+        long? lastReceived = null;
+        try
+        {
+            using var timer = new PeriodicTimer(HealthCheckInterval);
+            while (await timer.WaitForNextTickAsync(_shutdownCts.Token).ConfigureAwait(false))
+            {
+                if (_destroyed || _stopping || Volatile.Read(ref _disconnectRequested) != 0) return;
+                var result = await ValidateTunnelTrafficAsync(_shutdownCts.Token).ConfigureAwait(false);
+                long? received;
+                lock (_notificationGate) received = _trafficSnapshot?.ReceivedBytes;
+                // A blocked validation website must not interrupt a tunnel that
+                // is still delivering real application traffic.
+                if (!result.Success && received > lastReceived)
+                {
+                    failures = 0;
+                    lastReceived = received;
+                    continue;
+                }
+                if (received.HasValue) lastReceived = received;
+                if (result.Success) { failures = 0; continue; }
+                if (++failures < 2) continue;
+
+                if (Interlocked.CompareExchange(ref _healthRestarts, 1, 0) == 0)
+                {
+                    AndroidVpnRuntime.ReportStatus("recovering",
+                        "مسیر اینترنت VPN پاسخ نمی‌دهد؛ در حال بازسازی اتصال...", false);
+                    UpdateNotification("در حال بازسازی اتصال");
+                    var store = new TunnelConfigurationStore(Path.Combine(
+                        Microsoft.Maui.Storage.FileSystem.CacheDirectory, "vpn-start"));
+                    var token = await store.WriteAsync(xrayJson, _shutdownCts.Token).ConfigureAwait(false);
+                    try
+                    {
+                        await StartTunnelAsync(token, profileId, profileName, allowedPackages, metricsPort)
+                            .ConfigureAwait(false);
+                    }
+                    finally { store.Delete(token); }
+                    return;
+                }
+
+                AndroidVpnRuntime.SignalError("مسیر اینترنت VPN پس از بازسازی هم پاسخ نداد. یک سرور دیگر را انتخاب کن.",
+                    startupFailure: false);
+                RequestShutdown();
+                await StopTunnelAsync().ConfigureAwait(false);
+                return;
+            }
+        }
+        catch (System.OperationCanceledException) when (_shutdownCts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (_destroyed || _shutdownCts.IsCancellationRequested) return;
+            AndroidVpnRuntime.SignalError("بررسی سلامت VPN متوقف شد: " + NormalizeDiagnosticException(ex),
+                startupFailure: false);
+            RequestShutdown();
+            try { await StopTunnelAsync().ConfigureAwait(false); } catch { }
+        }
     }
 
 

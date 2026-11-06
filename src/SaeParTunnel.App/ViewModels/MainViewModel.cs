@@ -60,6 +60,9 @@ public sealed class MainViewModel : ObservableObject
     private bool _isPinging;
     private CancellationTokenSource? _pingCts;
     private string? _activeProfileId;
+#if ANDROID
+    private string _lastAndroidVpnError = "";
+#endif
     private int? _healthySearchTarget;
     private string _pingFeedback = "";
     private string _cleanupSummary = "سرور قدیمی پس از ۳ تست ناموفق پیاپی پاک می‌شود؛ سرور فعال حفظ می‌شود.";
@@ -2297,15 +2300,21 @@ public sealed class MainViewModel : ObservableObject
     {
         MainThread.BeginInvokeOnMainThread(() =>
         {
-            ConnectionStatusMessage = e.Message;
-            StatusMessage = e.Message;
+            if (e.Stage == "error") _lastAndroidVpnError = e.Message;
+            else if (e.Stage is "connected" or "service-running") _lastAndroidVpnError = "";
+            var message = e.Stage == "disconnected" && _lastAndroidVpnError.Length > 0
+                ? _lastAndroidVpnError : e.Message;
+            ConnectionStatusMessage = message;
+            StatusMessage = message;
             if (e.Connected.HasValue)
             {
                 if (e.Connected.Value && !string.IsNullOrWhiteSpace(e.ProfileId))
                     _activeProfileId = e.ProfileId;
                 IsConnected = e.Connected.Value;
-                SetConnectionUiPhase(ConnectionUiPhase.Idle);
+                SetConnectionUiPhase(e.Stage == "recovering"
+                    ? ConnectionUiPhase.Connecting : ConnectionUiPhase.Idle);
             }
+            if (e.Stage is "error" or "disconnected" or "recovering") RefreshDiagnosticsReport();
         });
     }
 #endif
