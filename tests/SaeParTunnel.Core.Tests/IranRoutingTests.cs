@@ -24,6 +24,7 @@ public sealed class IranRoutingTests
         Assert.Equal("proxy", root.GetProperty("outbounds")[0].GetProperty("tag").GetString());
         Assert.Equal("AsIs", root.GetProperty("routing").GetProperty("domainStrategy").GetString());
         Assert.True(root.GetProperty("inbounds")[0].GetProperty("sniffing").GetProperty("enabled").GetBoolean());
+        Assert.Equal(platform == "windows", root.GetProperty("inbounds")[0].GetProperty("sniffing").GetProperty("routeOnly").GetBoolean());
         var rules = root.GetProperty("routing").GetProperty("rules").EnumerateArray().ToArray();
         Assert.Equal("connection-probes", Tag(rules[0]));
         Assert.Equal("proxy", rules[0].GetProperty("outboundTag").GetString());

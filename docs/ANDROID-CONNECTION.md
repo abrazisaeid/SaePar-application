@@ -1,5 +1,15 @@
 # Android connection recovery (2.0.24)
 
+## Forward sniffed hostnames instead of poisoned destination IPs (2.0.42 preview)
+
+The 2.0.41 phone trace showed that routing selected the proxy correctly but
+still sent some foreign requests to private 10/8 addresses. Mobile TUN had
+`sniffing.routeOnly=true`, which preserves the phone's DNS result as the
+outbound target even after sniffing the real TLS/HTTP hostname. Mobile TUN
+now uses `routeOnly=false`, so the remote proxy receives and resolves the
+sniffed hostname. Literal-IP traffic is unaffected. Desktop SOCKS/HTTP
+inbounds retain their previous routing-only behavior.
+
 ## Allow QUIC with Vision on Android TUN (2.0.41 preview)
 
 Phone logs from 2.0.40 confirmed domain routing and showed repeated

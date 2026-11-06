@@ -134,7 +134,7 @@ public sealed class XrayConfigBuilder
                 name = interfaceName,
                 mtu
             },
-            ["sniffing"] = BuildSniffing()
+            ["sniffing"] = BuildSniffing(routeOnly: false)
         };
 
         object[] outbounds = websiteWhitelistEnabled && !settings.EnableIranBypass
@@ -237,12 +237,12 @@ public sealed class XrayConfigBuilder
         return inbound;
     }
 
-    private static object BuildSniffing() => new
+    private static object BuildSniffing(bool routeOnly = true) => new
     {
         enabled = true,
         destOverride = new[] { "http", "tls", "quic" },
         metadataOnly = false,
-        routeOnly = true
+        routeOnly
     };
 
     private static object BuildNormalRouting(AppSettings settings, bool includeProcesses, string whitelistRuleTag)
