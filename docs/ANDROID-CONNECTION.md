@@ -1,5 +1,14 @@
 # Android connection recovery (2.0.24)
 
+## Routing DNS stall fix (2.0.38 preview)
+
+The live Android log showed repeated routing DNS-over-HTTPS timeouts while the
+VPN remained established. Iran split routing now matches bundled domain rules
+and literal destination IPs without resolving every unmatched foreign hostname
+through the selected proxy. This removes the routing DNS dependency from the
+common connection path. Server-side resets can still affect a weak individual
+profile; sustained phone traffic needs verification after installing this build.
+
 ## Connection health recovery (2.0.37 preview)
 
 After the initial full-device HTTP validation succeeds, the Android foreground

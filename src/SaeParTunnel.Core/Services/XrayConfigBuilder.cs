@@ -62,7 +62,6 @@ public sealed class XrayConfigBuilder
             root["routing"] = (whitelistEnabled || iranBypass) && settings is not null
                 ? BuildNormalRouting(settings, includeProcesses: true, "whitelist-websites")
                 : BuildPrivateNetworkRouting();
-            if (iranBypass) root["dns"] = BuildRoutingDns();
         }
 
         return JsonSerializer.Serialize(root, JsonOptions);
@@ -163,7 +162,6 @@ public sealed class XrayConfigBuilder
 
         if (environment is not null)
             root["env"] = environment;
-        if (settings.EnableIranBypass) root["dns"] = BuildRoutingDns();
 
         return JsonSerializer.Serialize(root, JsonOptions);
     }
@@ -252,9 +250,9 @@ public sealed class XrayConfigBuilder
         var rules = new List<object> { BuildProbeRoutingRule(), BuildPrivateNetworkRule() };
         if (settings.EnableIranBypass)
         {
-            // IP classification uses encrypted DNS through the proxy, so an ISP
-            // block-page IP cannot silently classify a foreign domain as Iranian.
-            rules.Add(new { type = "field", inboundTag = new[] { "routing-dns" }, outboundTag = "proxy", ruleTag = "routing-dns-proxy" });
+            // Match known domains and literal destination IPs without resolving
+            // every foreign hostname. Routing-time DoH through a slow proxy can
+            // otherwise stall all new connections for seconds at a time.
             var catalog = IranRoutingCatalog.Default;
             var custom = settings.DirectRoutingEntries.Select(RoutingListParser.Normalize)
                 .OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -278,7 +276,7 @@ public sealed class XrayConfigBuilder
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (domains.Length > 0) rules.Add(DomainRule(domains, "proxy", whitelistRuleTag));
         }
-        return new { domainStrategy = settings.EnableIranBypass ? "IPIfNonMatch" : "AsIs", rules = rules.ToArray() };
+        return new { domainStrategy = "AsIs", rules = rules.ToArray() };
     }
 
     private static object DomainRule(string[] domains, string tag, string ruleTag) => new
@@ -286,12 +284,6 @@ public sealed class XrayConfigBuilder
 
     private static object IpRule(string[] ips, string ruleTag) => new
     { type = "field", ip = ips, outboundTag = "direct", ruleTag };
-
-    private static object BuildRoutingDns() => new
-    {
-        servers = new[] { "https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query" },
-        queryStrategy = "UseIP", disableCache = false, tag = "routing-dns"
-    };
 
     private static object BuildPrivateNetworkRouting() => new
     {

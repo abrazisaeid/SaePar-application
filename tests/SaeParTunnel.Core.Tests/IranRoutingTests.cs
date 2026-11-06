@@ -22,7 +22,7 @@ public sealed class IranRoutingTests
         using var doc = Build(platform, settings);
         var root = doc.RootElement;
         Assert.Equal("proxy", root.GetProperty("outbounds")[0].GetProperty("tag").GetString());
-        Assert.Equal("IPIfNonMatch", root.GetProperty("routing").GetProperty("domainStrategy").GetString());
+        Assert.Equal("AsIs", root.GetProperty("routing").GetProperty("domainStrategy").GetString());
         Assert.True(root.GetProperty("inbounds")[0].GetProperty("sniffing").GetProperty("enabled").GetBoolean());
         var rules = root.GetProperty("routing").GetProperty("rules").EnumerateArray().ToArray();
         Assert.Equal("connection-probes", Tag(rules[0]));
@@ -38,9 +38,8 @@ public sealed class IranRoutingTests
         Assert.Contains("domain:animelist.ir", Values(Find(rules, "iran-proxy-exceptions"), "domain"));
         Assert.Contains(Values(Find(rules, "iran-ip-ranges"), "ip"), ip => ip.Contains(':'));
         Assert.Equal("private-networks", Tag(rules[1]));
-        Assert.Equal("routing-dns", root.GetProperty("dns").GetProperty("tag").GetString());
-        Assert.All(Values(root.GetProperty("dns"), "servers"), server => Assert.StartsWith("https://", server));
-        Assert.Equal("proxy", Find(rules, "routing-dns-proxy").GetProperty("outboundTag").GetString());
+        Assert.False(root.TryGetProperty("dns", out _));
+        Assert.DoesNotContain(rules, r => Tag(r) == "routing-dns-proxy");
     }
 
     [Theory]
