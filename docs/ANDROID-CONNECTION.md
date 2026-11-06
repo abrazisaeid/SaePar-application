@@ -1,5 +1,15 @@
 # Android connection recovery (2.0.24)
 
+## Do not interrupt active VPN on validation failures (2.0.39 preview)
+
+Device logs from 2.0.38 showed Xray restarting about 66 seconds after a
+successful connection, followed by rapid subsequent starts. The periodic
+website validation was tearing down the VPN even while the user was trying to
+use it. The periodic rebuild has been removed; validation remains a startup
+check only. The connection now stays under user control rather than resetting
+on blocked or slow probe websites. Sustained throughput still needs a phone
+check because individual public proxies can independently reset connections.
+
 ## Routing DNS stall fix (2.0.38 preview)
 
 The live Android log showed repeated routing DNS-over-HTTPS timeouts while the
