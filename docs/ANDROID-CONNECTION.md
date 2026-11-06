@@ -1,5 +1,15 @@
 # Android connection recovery (2.0.24)
 
+## Require two foreign-site responses before marking Android servers healthy (2.0.43 preview)
+
+The currently selected public VMess server had a ping in SaePar but could not
+browse in either SaePar or V2rayNG. The Android discovery probe now keeps the
+cheap endpoint precheck and original Cloudflare request, then tests a second
+independent foreign endpoint only for candidates that pass the first. A
+candidate that answers only one is marked failed rather than saved as a
+working server. This adds work only for the small successful subset, while
+rejecting a common false positive from a single short response.
+
 ## Forward sniffed hostnames instead of poisoned destination IPs (2.0.42 preview)
 
 The 2.0.41 phone trace showed that routing selected the proxy correctly but

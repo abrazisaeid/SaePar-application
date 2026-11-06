@@ -20,7 +20,8 @@ internal sealed class AndroidProbeProcess
     private readonly Context _context = global::Android.App.Application.Context;
     private string CachePath => _context.CacheDir!.AbsolutePath;
 
-    public async Task<string> RunAsync(string config, int port, int seconds, CancellationToken cancellationToken)
+    public async Task<string> RunAsync(string config, int port, int seconds, CancellationToken cancellationToken,
+        string url = "https://cp.cloudflare.com/")
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         var store = new TunnelConfigurationStore(Path.Combine(CachePath, "probe-config"));
@@ -39,7 +40,7 @@ internal sealed class AndroidProbeProcess
                 deadline.CancelAfter(TimeSpan.FromSeconds(seconds + 4));
                 Task<string>? result = null;
                 var network = AndroidDirectNetwork.GetNetwork();
-                await MainThread.InvokeOnMainThreadAsync(() => { result = connection.Send(token, port, seconds, network); })
+                await MainThread.InvokeOnMainThreadAsync(() => { result = connection.Send(token, port, seconds, network, url); })
                     .ConfigureAwait(false);
                 var response = await result!.WaitAsync(deadline.Token).ConfigureAwait(false);
                 AndroidDirectNetwork.EnsureAvailable(network);
@@ -158,7 +159,7 @@ internal sealed class AndroidProbeProcess
         public void OnBindingDied(ComponentName? name) => Close();
         public void OnNullBinding(ComponentName? name) => Close();
 
-        public Task<string> Send(string token, int port, int seconds, global::Android.Net.Network network)
+        public Task<string> Send(string token, int port, int seconds, global::Android.Net.Network network, string url)
         {
             _result = new(TaskCreationOptions.RunContinuationsAsynchronously);
             using var message = Message.Obtain(null, SaeParProbeService.Run);
@@ -167,6 +168,7 @@ internal sealed class AndroidProbeProcess
             message.Data.PutString("token", token);
             message.Data.PutInt("port", port);
             message.Data.PutInt("seconds", seconds);
+            message.Data.PutString("url", url);
             message.Data.PutParcelable("network", network);
             (_remote ?? throw new TunnelStartupException("ارتباط با موتور تست قطع شد.")).Send(message);
             return _result.Task;
@@ -244,6 +246,9 @@ public sealed class SaeParProbeService : Service
             var token = message.Data?.GetString("token") ?? string.Empty;
             var port = message.Data?.GetInt("port") ?? 0;
             var seconds = Math.Clamp(message.Data?.GetInt("seconds") ?? 4, 1, 7);
+            var url = message.Data?.GetString("url") ?? "https://cp.cloudflare.com/";
+            if (url is not ("https://cp.cloudflare.com/" or "https://www.gstatic.com/generate_204"))
+                url = "https://cp.cloudflare.com/";
             // Parcelable Network works on our minimum API 24, unlike FromNetworkHandle (API 28).
 #pragma warning disable CA1422
             var network = message.Data?.GetParcelable("network") as global::Android.Net.Network;
@@ -279,7 +284,7 @@ public sealed class SaeParProbeService : Service
                     var request = JsonSerializer.Serialize(new
                     {
                         apiVersion = 1, method = "ping",
-                        payload = new { configPath = path, timeout = seconds, url = "https://cp.cloudflare.com/", proxy = $"socks5://127.0.0.1:{port}" }
+                        payload = new { configPath = path, timeout = seconds, url, proxy = $"socks5://127.0.0.1:{port}" }
                     });
                     var response = SaeParXrayBridge.Invoke(request);
                     AndroidDirectNetwork.EnsureAvailable(network);

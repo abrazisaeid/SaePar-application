@@ -81,7 +81,21 @@ public sealed class AndroidTunnelService : ITunnelService
             var config = _configBuilder.BuildAndroidProbe(profile, socksPort);
             var response = await ProbeProcess.RunAsync(config, socksPort,
                 settings.FastTestMode ? 4 : 7, cancellationToken).ConfigureAwait(false);
-            return ParsePingResponse(response);
+            var first = ParsePingResponse(response);
+            if (!first.Success) return first;
+
+            // A single short Cloudflare request can succeed on a proxy that
+            // cannot browse elsewhere. Only candidates passing that cheap gate
+            // pay for a second, independent foreign-site request.
+            var secondResponse = await ProbeProcess.RunAsync(config, socksPort,
+                settings.FastTestMode ? 4 : 7, cancellationToken,
+                "https://www.gstatic.com/generate_204").ConfigureAwait(false);
+            var second = ParsePingResponse(secondResponse);
+            if (!second.Success)
+                return new TestResult(false, null,
+                    "سرور فقط به یک سایت تست پاسخ داد و برای اینترنت پایدار تأیید نشد.", ValidationLevel.None);
+            return new TestResult(true, Math.Max(first.LatencyMs ?? 0, second.LatencyMs ?? 0),
+                "دو مقصد خارجی از پروکسی پاسخ دادند.", ValidationLevel.FullProxy);
         }
         catch (System.OperationCanceledException) { throw; }
         catch (TunnelStartupException) { throw; }

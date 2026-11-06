@@ -11,10 +11,10 @@
     <LangVersion>latest</LangVersion>
     <ApplicationTitle>SaePar Tunnel</ApplicationTitle>
     <ApplicationId>com.saepar.tunnel</ApplicationId>
-    <ApplicationDisplayVersion>2.0.42</ApplicationDisplayVersion>
-    <ApplicationVersion>62</ApplicationVersion>
-    <Version>2.0.42</Version>
-    <PackageVersion>2.0.42</PackageVersion>
+    <ApplicationDisplayVersion>2.0.43</ApplicationDisplayVersion>
+    <ApplicationVersion>63</ApplicationVersion>
+    <Version>2.0.43</Version>
+    <PackageVersion>2.0.43</PackageVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
